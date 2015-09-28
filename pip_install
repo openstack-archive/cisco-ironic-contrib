@@ -1,0 +1,30 @@
+#!/bin/sh
+set -ex
+
+ZUUL_CLONER=/usr/zuul-env/bin/zuul-cloner
+
+mkdir -p .test-tars
+
+if $(python -c "import ironic" 2> /dev/null); then
+    echo "Ironic already installed."
+elif [ -x $ZUUL_CLONER ]; then
+    $ZUUL_CLONER --cache-dir /opt/git --workspace /tmp git://git.openstack.org openstack/ironic
+    pip install /tmp/openstack/ironic
+else
+    ( cd .test-tars && wget -N http://tarballs.openstack.org/ironic/ironic-master.tar.gz )
+    pip install .test-tars/ironic-master.tar.gz
+fi
+
+if $(python -c "import nova" 2> /dev/null); then
+    echo "Nova already installed."
+elif [ -x $ZUUL_CLONER ]; then
+    $ZUUL_CLONER --cache-dir /opt/git --workspace /tmp git://git.openstack.org openstack/nova
+    pip install /tmp/openstack/nova
+else
+    ( cd .test-tars && wget -N http://tarballs.openstack.org/nova/nova-master.tar.gz )
+    pip install .test-tars/nova-master.tar.gz
+fi
+
+pip install -U $*
+
+exit $?
