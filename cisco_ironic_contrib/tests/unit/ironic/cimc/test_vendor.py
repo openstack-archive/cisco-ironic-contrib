@@ -21,7 +21,7 @@ from ironic.common import states
 from ironic.conductor import task_manager
 from ironic.conductor import utils as manager_utils
 from ironic import objects
-from ironic.tests.unit.drivers.modules.cimc import test_common
+from ironic.tests.drivers.cimc import test_common
 
 from cisco_ironic_contrib.ironic.cimc import common
 

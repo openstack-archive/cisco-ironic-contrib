@@ -16,7 +16,7 @@ import six
 import sys
 
 from ironic.drivers import fake
-from ironic.tests.unit.drivers import third_party_driver_mocks  # noqa
+from ironic.tests.drivers import third_party_driver_mocks  # noqa
 
 from cisco_ironic_contrib.ironic.cimc import boot
 from cisco_ironic_contrib.ironic.cimc import vendor

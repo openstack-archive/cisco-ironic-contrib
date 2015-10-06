@@ -24,7 +24,7 @@ from ironic.dhcp import neutron
 from ironic.drivers.modules import deploy_utils
 from ironic.drivers.modules import pxe
 from ironic import objects
-from ironic.tests.unit.drivers.modules.cimc import test_common
+from ironic.tests.drivers.cimc import test_common
 
 from cisco_ironic_contrib.ironic.cimc import boot
 from cisco_ironic_contrib.ironic.cimc import common

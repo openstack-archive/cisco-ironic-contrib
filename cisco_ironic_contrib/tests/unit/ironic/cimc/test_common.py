@@ -19,7 +19,7 @@ from oslo_utils import importutils
 
 from ironic.conductor import task_manager
 from ironic.drivers.modules.cimc import common as cimc_common
-from ironic.tests.unit.drivers.modules.cimc import test_common
+from ironic.tests.drivers.cimc import test_common
 
 from cisco_ironic_contrib.ironic.cimc import common
 
