@@ -56,7 +56,10 @@ class PXEBootTestCase(test_common.CIMCBaseTestCase):
             'port': {
                 'id': 'fake_id',
                 'network_id': CONF.neutron.cleaning_network_uuid,
-                'mac_address': 'fake_address'
+                'mac_address': 'fake_address',
+                'fixed_ips': [
+                    {'ip_address': "1.2.3.4"}
+                ],
             }
         }
 
@@ -66,7 +69,7 @@ class PXEBootTestCase(test_common.CIMCBaseTestCase):
             }
         }
 
-        task.driver.boot._plug_provisioning(task)
+        ip = task.driver.boot._plug_provisioning(task)
 
         neutron_data = {
             'port': {
@@ -87,6 +90,7 @@ class PXEBootTestCase(test_common.CIMCBaseTestCase):
                                               "type": "deploy",
                                               "state": "ACTIVE"})
         mock_port.return_value.create.assert_called_once_with()
+        self.assertEqual('1.2.3.4', ip)
 
     @mock.patch.object(objects, 'Port', autospec=True)
     @mock.patch.object(neutron, '_build_client', autospec=True)

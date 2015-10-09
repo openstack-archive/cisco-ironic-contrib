@@ -69,6 +69,7 @@ class PXEBoot(pxe.PXEBoot):
             extra={"vif_port_id": port['port']['id'],
                    "type": "deploy", "state": "ACTIVE"})
         new_port.create()
+        return port['port']['fixed_ips'][0]['ip_address']
 
     def _unplug_provisioning(self, task, **kwargs):
         LOG.debug("Unplugging the provisioning!")
@@ -99,7 +100,7 @@ class PXEBoot(pxe.PXEBoot):
                 os.path.basename(CONF.pxe.ipxe_boot_script))
             shutil.copyfile(CONF.pxe.ipxe_boot_script, bootfile_path)
 
-        self._plug_provisioning(task)
+        prov_ip = self._plug_provisioning(task)
 
         task.ports = objects.Port.list_by_node_id(task.context, node.id)
 
@@ -112,6 +113,7 @@ class PXEBoot(pxe.PXEBoot):
 
         pxe_options = pxe._build_pxe_config_options(task, pxe_info)
         pxe_options.update(ramdisk_params)
+        pxe_options['advertise_host'] = prov_ip
 
         if deploy_utils.get_boot_mode_for_deploy(node) == 'uefi':
             pxe_config_template = CONF.pxe.uefi_pxe_config_template
