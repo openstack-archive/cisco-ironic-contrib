@@ -59,8 +59,7 @@ class PXEBoot(pxe.PXEBoot):
             common.add_vnic(
                 task, name, port['port']['mac_address'], seg_id, True)
         except imcsdk.ImcException:
-            # TODO(sambetts) Plumming the port failed, so clean up neutron port
-            # we created before
+            client.delete_port(name)
             raise
 
         new_port = objects.Port(
@@ -76,15 +75,11 @@ class PXEBoot(pxe.PXEBoot):
         client = neutron._build_client(task.context.auth_token)
 
         ports = objects.Port.list_by_node_id(task.context, task.node.id)
-        todelete = None
         for port in ports:
             if port['extra'].get('type') == "deploy":
-                todelete = port
-                break
-
-        common.delete_vnic(task, todelete['extra']['vif_port_id'])
-        client.delete_port(todelete['extra']['vif_port_id'])
-        todelete.destroy()
+                common.delete_vnic(task, port['extra']['vif_port_id'])
+                client.delete_port(port['extra']['vif_port_id'])
+                port.destroy()
 
     def validate(self, task):
         pass
@@ -132,3 +127,7 @@ class PXEBoot(pxe.PXEBoot):
         super(PXEBoot, self).prepare_instance(task)
         if deploy_utils.get_boot_option(task.node) == "local":
             self._unplug_provisioning(task)
+
+    def clean_up_ramdisk(self, task):
+        super(PXEBoot, self).clean_up_ramdisk(task)
+        self._unplug_provisioning(task)
