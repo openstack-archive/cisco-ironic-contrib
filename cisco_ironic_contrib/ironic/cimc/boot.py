@@ -23,6 +23,7 @@ from oslo_utils import importutils
 from ironic.common import boot_devices
 from ironic.common import pxe_utils
 from ironic.common import states
+from ironic.conductor import utils as manager_utils
 from ironic.dhcp import neutron
 from ironic.drivers.modules import deploy_utils
 from ironic.drivers.modules import pxe
@@ -40,6 +41,8 @@ class PXEBoot(pxe.PXEBoot):
 
     def _plug_provisioning(self, task, **kwargs):
         LOG.debug("Plugging the provisioning!")
+        if task.node.power_state != states.POWER_ON:
+            manager_utils.node_power_action(task, states.REBOOT)
 
         client = neutron._build_client(task.context.auth_token)
         port = client.create_port({
@@ -72,6 +75,9 @@ class PXEBoot(pxe.PXEBoot):
 
     def _unplug_provisioning(self, task, **kwargs):
         LOG.debug("Unplugging the provisioning!")
+        if task.node.power_state != states.POWER_ON:
+            manager_utils.node_power_action(task, states.REBOOT)
+
         client = neutron._build_client(task.context.auth_token)
 
         ports = objects.Port.list_by_node_id(task.context, task.node.id)
@@ -131,3 +137,4 @@ class PXEBoot(pxe.PXEBoot):
     def clean_up_ramdisk(self, task):
         super(PXEBoot, self).clean_up_ramdisk(task)
         self._unplug_provisioning(task)
+        task.ports = objects.Port.list_by_node_id(task.context, task.node.id)

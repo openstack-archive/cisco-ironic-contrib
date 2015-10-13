@@ -20,6 +20,7 @@ from ironic.common import boot_devices
 from ironic.common import pxe_utils
 from ironic.common import states
 from ironic.conductor import task_manager
+from ironic.conductor import utils as manager_utils
 from ironic.dhcp import neutron
 from ironic.drivers.modules import deploy_utils
 from ironic.drivers.modules import pxe
@@ -45,12 +46,13 @@ def with_task(func):
 
 class PXEBootTestCase(test_common.CIMCBaseTestCase):
 
+    @mock.patch.object(manager_utils, 'node_power_action', autospec=True)
     @mock.patch.object(objects, 'Port', autospec=True)
     @mock.patch.object(common, 'add_vnic', autospec=True)
     @mock.patch.object(neutron, '_build_client', autospec=True)
     @with_task
     def test_plug_provisioning(self, task, mock__build_client,
-                               mock_add_vnic, mock_port):
+                               mock_add_vnic, mock_port, mock_power):
         client = mock__build_client.return_value
         client.create_port.return_value = {
             'port': {
@@ -78,6 +80,7 @@ class PXEBootTestCase(test_common.CIMCBaseTestCase):
             }
         }
 
+        mock_power.assert_called_once_with(task, states.REBOOT)
         client.create_port.assert_called_once_with(neutron_data)
         client.show_network.assert_called_once_with(
             CONF.neutron.cleaning_network_uuid)
@@ -92,12 +95,13 @@ class PXEBootTestCase(test_common.CIMCBaseTestCase):
         mock_port.return_value.create.assert_called_once_with()
         self.assertEqual('1.2.3.4', ip)
 
+    @mock.patch.object(manager_utils, 'node_power_action', autospec=True)
     @mock.patch.object(objects, 'Port', autospec=True)
     @mock.patch.object(neutron, '_build_client', autospec=True)
     @mock.patch.object(common, 'delete_vnic', autospec=True)
     @with_task
-    def test_unplug_provisioning(
-            self, task, mock_delete_vnic, mock__build_client, mock_port):
+    def test_unplug_provisioning(self, task, mock_delete_vnic,
+                                 mock__build_client, mock_port, mock_power):
 
         portMock1 = mock.MagicMock()
         portMock1.__getitem__.return_value = {
@@ -125,6 +129,7 @@ class PXEBootTestCase(test_common.CIMCBaseTestCase):
 
         task.driver.boot._unplug_provisioning(task)
 
+        mock_power.assert_called_once_with(task, states.REBOOT)
         mock_delete_vnic.assert_called_once_with(task, 'port2')
         client.delete_port.assert_called_once_with('port2')
         portMock2.destroy.assert_called_once_with()
