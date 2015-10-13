@@ -59,7 +59,7 @@ def add_vnic(task, name, mac, vlan, pxe=False):
             method, imcsdk.WriteXmlOption.DIRTY)
         error = getattr(resp, 'error_code', None)
         if error:
-            raise imcsdk.ImcException(error)
+            raise imcsdk.ImcException(node=task.node.uuid, error=error)
 
 
 def delete_vnic(task, name):
