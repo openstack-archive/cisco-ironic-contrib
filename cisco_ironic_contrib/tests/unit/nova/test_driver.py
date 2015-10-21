@@ -70,8 +70,7 @@ class CiscoIronicDriverTestCase(test.NoDBTestCase):
 
     @mock.patch.object(neutron, 'get_client')
     @mock.patch.object(FAKE_CLIENT.node, 'vendor_passthru')
-    @mock.patch.object(FAKE_CLIENT.port, 'get_by_address')
-    def test_plug_vifs_with_port(self, mock_address, mock_vp, mock_neutron):
+    def test_plug_vifs_with_port(self, mock_vp, mock_neutron):
         node = ironic_utils.get_test_node()
         instance = fake_instance.fake_instance_obj(self.ctx,
                                                    node=node.uuid)
@@ -79,8 +78,6 @@ class CiscoIronicDriverTestCase(test.NoDBTestCase):
         mock_neutron.return_value.show_network.return_value = {
             'network': {
                 'provider:segmentation_id': 600}}
-        mock_address.return_value = ironic_utils.get_test_port(
-            extra={'state': 'UP'})
 
         self.driver._plug_vifs(node, instance, network_info)
         expected_info = {
@@ -91,20 +88,16 @@ class CiscoIronicDriverTestCase(test.NoDBTestCase):
         }
         mock_vp.assert_called_once_with(node.uuid, 'add_vnic',
                                         args=expected_info)
-        mock_address.assert_called_once_with(network_info[0]['address'])
 
     @mock.patch.object(neutron, 'get_client')
     @mock.patch.object(FAKE_CLIENT.node, 'vendor_passthru')
-    @mock.patch.object(FAKE_CLIENT.port, 'get_by_address')
-    def test_plug_vifs_no_network_info(self, mock_address, mock_vp,
-                                       mock_neutron):
+    def test_plug_vifs_no_network_info(self, mock_vp, mock_neutron):
         node = ironic_utils.get_test_node()
         instance = fake_instance.fake_instance_obj(self.ctx,
                                                    node=node.uuid)
         network_info = []
         self.driver._plug_vifs(node, instance, network_info)
         self.assertFalse(mock_vp.called)
-        self.assertFalse(mock_address.called)
 
     @mock.patch.object(FAKE_CLIENT.node, 'vendor_passthru')
     def test_unplug_vifs(self, mock_vp):

@@ -73,6 +73,25 @@ class PXEBoot(pxe.PXEBoot):
         new_port.create()
         return port['port']['fixed_ips'][0]['ip_address']
 
+    def _plug_tenant_networks(self, task, **kwargs):
+        ports = objects.Port.list_by_node_id(task.context, task.node.id)
+        for port in ports:
+            pargs = port['extra']
+            if pargs.get('type') == "tenant" and pargs['state'] == "DOWN":
+                try:
+                    common.add_vnic(
+                        task, pargs['vif_port_id'], port['address'],
+                        pargs['seg_id'], pargs['pxe'])
+                except imcsdk.ImcException:
+                    port.extra = {x: pargs[x] for x in pargs}
+                    port.extra['state'] = "ERROR"
+                    LOG.error("ADDING VNIC FAILED")
+                else:
+                    port.extra = {x: pargs[x] for x in pargs}
+                    port.extra['state'] = "UP"
+                    LOG.info("ADDING VNIC SUCCESSFUL")
+                port.save()
+
     def _unplug_provisioning(self, task, **kwargs):
         LOG.debug("Unplugging the provisioning!")
         if task.node.power_state != states.POWER_ON:
@@ -86,6 +105,17 @@ class PXEBoot(pxe.PXEBoot):
                 common.delete_vnic(task, port['extra']['vif_port_id'])
                 client.delete_port(port['extra']['vif_port_id'])
                 port.destroy()
+
+    def _unplug_tenant_networks(self, task, **kwargs):
+        ports = objects.Port.list_by_node_id(task.context, task.node.id)
+        for port in ports:
+            pargs = port['extra']
+            if pargs.get('type') == "tenant" and pargs['state'] == "UP":
+                common.delete_vnic(task, port['extra']['vif_port_id'])
+                port.extra = {x: pargs[x] for x in pargs}
+                port.extra['state'] = "DOWN"
+                port.save()
+                LOG.info("DELETEING VNIC SUCCESSFUL")
 
     def validate(self, task):
         pass
@@ -133,8 +163,14 @@ class PXEBoot(pxe.PXEBoot):
         super(PXEBoot, self).prepare_instance(task)
         if deploy_utils.get_boot_option(task.node) == "local":
             self._unplug_provisioning(task)
+        self._plug_tenant_networks(task)
 
     def clean_up_ramdisk(self, task):
         super(PXEBoot, self).clean_up_ramdisk(task)
         self._unplug_provisioning(task)
+        task.ports = objects.Port.list_by_node_id(task.context, task.node.id)
+
+    def clean_up_instance(self, task):
+        super(PXEBoot, self).clean_up_instance(task)
+        self._unplug_tenant_networks(task)
         task.ports = objects.Port.list_by_node_id(task.context, task.node.id)
