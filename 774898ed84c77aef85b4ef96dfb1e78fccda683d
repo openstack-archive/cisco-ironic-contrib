@@ -1,0 +1,8 @@
+Verified+2: Jenkins
+Code-Review+2: Sam Betts <sam@code-smash.net>
+Workflow+1: Sam Betts <sam@code-smash.net>
+Submitted-by: Jenkins
+Submitted-at: Mon, 02 Nov 2015 12:58:33 +0000
+Reviewed-on: https://review.openstack.org/238170
+Project: openstack/cisco-ironic-contrib
+Branch: refs/heads/master
