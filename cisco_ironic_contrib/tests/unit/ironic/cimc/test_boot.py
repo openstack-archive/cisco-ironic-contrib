@@ -85,13 +85,14 @@ class PXEBootTestCase(test_common.CIMCBaseTestCase):
         client.show_network.assert_called_once_with(
             CONF.neutron.cleaning_network_uuid)
         mock_add_vnic.assert_called_once_with(
-            task, 'fake_id', 'fake_address', 600, True)
+            task, 0, 'fake_address', 600, True)
         mock_port.assert_called_once_with(task.context, node_id=task.node.id,
                                           address='fake_address',
                                           extra={
                                               "vif_port_id": 'fake_id',
                                               "type": "deploy",
-                                              "state": "ACTIVE"})
+                                              "state": "ACTIVE",
+                                              "vnic_id": 0})
         mock_port.return_value.create.assert_called_once_with()
         self.assertEqual('1.2.3.4', ip)
 
@@ -106,19 +107,22 @@ class PXEBootTestCase(test_common.CIMCBaseTestCase):
         portMock1 = mock.MagicMock()
         portMock1.__getitem__.return_value = {
             'type': 'tenant',
-            'vif_port_id': 'port1'
+            'vif_port_id': 'port1',
+            'vnic_id': 0
         }
 
         portMock2 = mock.MagicMock()
         portMock2.__getitem__.return_value = {
             'type': 'deploy',
-            'vif_port_id': 'port2'
+            'vif_port_id': 'port2',
+            'vnic_id': 1
         }
 
         portMock3 = mock.MagicMock()
         portMock3.__getitem__.return_value = {
             'type': 'tenant',
-            'vif_port_id': 'port3'
+            'vif_port_id': 'port3',
+            'vnic_id': 2
         }
 
         mock_port.list_by_node_id.return_value = [portMock1,
@@ -130,7 +134,7 @@ class PXEBootTestCase(test_common.CIMCBaseTestCase):
         task.driver.boot._unplug_provisioning(task)
 
         mock_power.assert_called_once_with(task, states.REBOOT)
-        mock_delete_vnic.assert_called_once_with(task, 'port2')
+        mock_delete_vnic.assert_called_once_with(task, 1)
         client.delete_port.assert_called_once_with('port2')
         portMock2.destroy.assert_called_once_with()
 
