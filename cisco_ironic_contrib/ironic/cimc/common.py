@@ -21,9 +21,12 @@ imcsdk = importutils.try_import('ImcSdk')
 
 LOG = logging.getLogger(__name__)
 
+NUMBER_OF_UPLINKS = 2
 
-def add_vnic(task, name, mac, vlan, pxe=False):
-    name = name[0:31]
+
+def add_vnic(task, vnic_id, mac, vlan, uplink=None, pxe=False):
+    name = "eth%d" % vnic_id
+    uplink = uplink if uplink else vnic_id % NUMBER_OF_UPLINKS
     with common.cimc_handle(task) as handle:
         rackunit = handle.get_imc_managedobject(
             None, imcsdk.ComputeRackUnit.class_id())
@@ -43,12 +46,13 @@ def add_vnic(task, name, mac, vlan, pxe=False):
         newVic.set_attr("mtu", "1500")
         newVic.set_attr("pxeBoot", "enabled" if pxe else "disabled")
         newVic.set_attr("Dn", dn)
-        newVic.set_attr("mac", mac)
-        newVic.set_attr("uplinkPort", "1")
+        if mac:
+            newVic.set_attr("mac", mac)
+        newVic.set_attr("uplinkPort", str(uplink))
 
         vlanProfile = imcsdk.ImcCore.ManagedObject("adaptorEthGenProfile")
         vlanProfile.set_attr("vlanMode", "ACCESS")
-        vlanProfile.set_attr("vlan", str(vlan))
+        vlanProfile.set_attr("vlan", str(vlan) if vlan else "NONE")
         vlanProfile.set_attr("Dn", dn)
 
         newVic.add_child(vlanProfile)
@@ -62,15 +66,22 @@ def add_vnic(task, name, mac, vlan, pxe=False):
             raise imcsdk.ImcException(node=task.node.uuid, error=error)
 
 
-def delete_vnic(task, name):
-    name = name[0:31]
-    with common.cimc_handle(task) as handle:
-        rackunit = handle.get_imc_managedobject(
-            None, imcsdk.ComputeRackUnit.class_id())
-        adaptorunits = handle.get_imc_managedobject(
-            in_mo=rackunit, class_id=imcsdk.AdaptorUnit.class_id())
-        vic = {
-            "Dn": "%s/host-eth-%s" % (adaptorunits[0].Dn, name),
-        }
-        handle.remove_imc_managedobject(
-            None, class_id="adaptorHostEthIf", params=vic)
+def delete_vnic(task, vnic_id):
+    if vnic_id < NUMBER_OF_UPLINKS:
+        clean_vnic(task, vnic_id)
+    else:
+        name = "eth%d" % vnic_id
+        with common.cimc_handle(task) as handle:
+            rackunit = handle.get_imc_managedobject(
+                None, imcsdk.ComputeRackUnit.class_id())
+            adaptorunits = handle.get_imc_managedobject(
+                in_mo=rackunit, class_id=imcsdk.AdaptorUnit.class_id())
+            vic = {
+                "Dn": "%s/host-eth-%s" % (adaptorunits[0].Dn, name),
+            }
+            handle.remove_imc_managedobject(
+                None, class_id="adaptorHostEthIf", params=vic)
+
+
+def clean_vnic(task, vnic_id):
+    add_vnic(task, vnic_id, None, None)

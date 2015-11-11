@@ -54,33 +54,35 @@ class PXEBoot(pxe.PXEBoot):
             }
         })
 
-        name = port['port']['id']
+        vnic_id = 0
         network = client.show_network(port['port']['network_id'])
         seg_id = network['network']['provider:segmentation_id']
 
         try:
             common.add_vnic(
-                task, name, port['port']['mac_address'], seg_id, True)
+                task, vnic_id, port['port']['mac_address'], seg_id, True)
         except imcsdk.ImcException:
-            client.delete_port(name)
+            client.delete_port(port['port']['id'])
             raise
 
         new_port = objects.Port(
             task.context, node_id=task.node.id,
             address=port['port']['mac_address'],
             extra={"vif_port_id": port['port']['id'],
+                   "vnic_id": 0,
                    "type": "deploy", "state": "ACTIVE"})
         new_port.create()
         return port['port']['fixed_ips'][0]['ip_address']
 
     def _plug_tenant_networks(self, task, **kwargs):
         ports = objects.Port.list_by_node_id(task.context, task.node.id)
+        vnic_id = 0
         for port in ports:
             pargs = port['extra']
             if pargs.get('type') == "tenant" and pargs['state'] == "DOWN":
                 try:
                     common.add_vnic(
-                        task, pargs['vif_port_id'], port['address'],
+                        task, "eth%d" % vnic_id, port['address'],
                         pargs['seg_id'], pargs['pxe'])
                 except imcsdk.ImcException:
                     port.extra = {x: pargs[x] for x in pargs}
@@ -89,6 +91,8 @@ class PXEBoot(pxe.PXEBoot):
                 else:
                     port.extra = {x: pargs[x] for x in pargs}
                     port.extra['state'] = "UP"
+                    port.extra['vnic_id'] = vnic_id
+                    vnic_id = vnic_id + 1
                     LOG.info("ADDING VNIC SUCCESSFUL")
                 port.save()
 
@@ -102,7 +106,7 @@ class PXEBoot(pxe.PXEBoot):
         ports = objects.Port.list_by_node_id(task.context, task.node.id)
         for port in ports:
             if port['extra'].get('type') == "deploy":
-                common.delete_vnic(task, port['extra']['vif_port_id'])
+                common.delete_vnic(task, port['extra']['vnic_id'])
                 client.delete_port(port['extra']['vif_port_id'])
                 port.destroy()
 
@@ -111,9 +115,10 @@ class PXEBoot(pxe.PXEBoot):
         for port in ports:
             pargs = port['extra']
             if pargs.get('type') == "tenant" and pargs['state'] == "UP":
-                common.delete_vnic(task, port['extra']['vif_port_id'])
+                common.delete_vnic(task, port['extra']['vnic_id'])
                 port.extra = {x: pargs[x] for x in pargs}
                 port.extra['state'] = "DOWN"
+                port.extra['vnic_id'] = None
                 port.save()
                 LOG.info("DELETEING VNIC SUCCESSFUL")
 
