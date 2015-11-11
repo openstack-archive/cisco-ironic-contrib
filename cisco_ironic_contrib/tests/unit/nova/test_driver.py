@@ -31,7 +31,7 @@ FAKE_CLIENT = ironic_utils.FakeClient()
 
 
 class FakeClientWrapper(cw.IronicClientWrapper):
-    def _get_client(self, retry_on_conflict=False):
+    def _get_client(self, **kwargs):
         return FAKE_CLIENT
 
 
