@@ -17,18 +17,15 @@ import mock
 from oslo_config import cfg
 
 from ironic.common import boot_devices
+from ironic.common import dhcp_factory
 from ironic.common import pxe_utils
 from ironic.common import states
 from ironic.conductor import task_manager
-from ironic.conductor import utils as manager_utils
-from ironic.dhcp import neutron
 from ironic.drivers.modules import deploy_utils
 from ironic.drivers.modules import pxe
-from ironic import objects
 from ironic.tests.unit.drivers.modules.cimc import test_common
 
 from cisco_ironic_contrib.ironic.cimc import boot
-from cisco_ironic_contrib.ironic.cimc import common
 
 CONF = cfg.CONF
 
@@ -46,123 +43,39 @@ def with_task(func):
 
 class PXEBootTestCase(test_common.CIMCBaseTestCase):
 
-    @mock.patch.object(manager_utils, 'node_power_action', autospec=True)
-    @mock.patch.object(objects, 'Port', autospec=True)
-    @mock.patch.object(common, 'add_vnic', autospec=True)
-    @mock.patch.object(neutron, '_build_client', autospec=True)
-    @with_task
-    def test_plug_provisioning(self, task, mock__build_client,
-                               mock_add_vnic, mock_port, mock_power):
-        client = mock__build_client.return_value
-        client.create_port.return_value = {
-            'port': {
-                'id': 'fake_id',
-                'network_id': CONF.neutron.cleaning_network_uuid,
-                'mac_address': 'fake_address',
-                'fixed_ips': [
-                    {'ip_address': "1.2.3.4"}
-                ],
-            }
-        }
-
-        client.show_network.return_value = {
-            'network': {
-                'provider:segmentation_id': 600
-            }
-        }
-
-        ip = task.driver.boot._plug_provisioning(task)
-
-        neutron_data = {
-            'port': {
-                "network_id": CONF.neutron.cleaning_network_uuid,
-                "extra_dhcp_opts": pxe_utils.dhcp_options_for_instance(task),
-            }
-        }
-
-        mock_power.assert_called_once_with(task, states.REBOOT)
-        client.create_port.assert_called_once_with(neutron_data)
-        client.show_network.assert_called_once_with(
-            CONF.neutron.cleaning_network_uuid)
-        mock_add_vnic.assert_called_once_with(
-            task, 0, 'fake_address', 600, True)
-        mock_port.assert_called_once_with(task.context, node_id=task.node.id,
-                                          address='fake_address',
-                                          extra={
-                                              "vif_port_id": 'fake_id',
-                                              "type": "deploy",
-                                              "state": "ACTIVE",
-                                              "vnic_id": 0})
-        mock_port.return_value.create.assert_called_once_with()
-        self.assertEqual('1.2.3.4', ip)
-
-    @mock.patch.object(manager_utils, 'node_power_action', autospec=True)
-    @mock.patch.object(objects, 'Port', autospec=True)
-    @mock.patch.object(neutron, '_build_client', autospec=True)
-    @mock.patch.object(common, 'delete_vnic', autospec=True)
-    @with_task
-    def test_unplug_provisioning(self, task, mock_delete_vnic,
-                                 mock__build_client, mock_port, mock_power):
-
-        portMock1 = mock.MagicMock()
-        portMock1.__getitem__.return_value = {
-            'type': 'tenant',
-            'vif_port_id': 'port1',
-            'vnic_id': 0
-        }
-
-        portMock2 = mock.MagicMock()
-        portMock2.__getitem__.return_value = {
-            'type': 'deploy',
-            'vif_port_id': 'port2',
-            'vnic_id': 1
-        }
-
-        portMock3 = mock.MagicMock()
-        portMock3.__getitem__.return_value = {
-            'type': 'tenant',
-            'vif_port_id': 'port3',
-            'vnic_id': 2
-        }
-
-        mock_port.list_by_node_id.return_value = [portMock1,
-                                                  portMock2,
-                                                  portMock3]
-
-        client = mock__build_client.return_value
-
-        task.driver.boot._unplug_provisioning(task)
-
-        mock_power.assert_called_once_with(task, states.REBOOT)
-        mock_delete_vnic.assert_called_once_with(task, 1)
-        client.delete_port.assert_called_once_with('port2')
-        portMock2.destroy.assert_called_once_with()
-
     @with_task
     def test_validate(self, task):
         result = task.driver.boot.validate(task)
         self.assertIsNone(result)
 
     @mock.patch.object(deploy_utils, 'try_set_boot_device', autospec=True)
-    @mock.patch.object(boot.PXEBoot, '_plug_provisioning', autospec=True)
     @mock.patch.object(pxe, '_get_deploy_image_info', autospec=True)
     @mock.patch.object(pxe, '_build_pxe_config_options', autospec=True)
     @mock.patch.object(pxe, '_get_instance_image_info', autospec=True)
     @mock.patch.object(pxe_utils, 'create_pxe_config', autospec=True)
     @mock.patch.object(pxe, '_cache_ramdisk_kernel', autospec=True)
-    def test_prepare_ramdisk(self, mock_cache_ramdisk, mock_create_pxe,
+    @mock.patch.object(boot, 'get_provisioning_vifs', autospec=True)
+    @mock.patch.object(dhcp_factory.DHCPFactory, 'update_dhcp', autospec=True)
+    @mock.patch.object(boot.network_provider, 'add_provisioning_network',
+                       autospec=True)
+    def test_prepare_ramdisk(self, mock_add_pro, mock_dhcp, mock_get_vifs,
+                             mock_cache_ramdisk, mock_create_pxe,
                              mock_get_instance, mock_build_pxe,
-                             mock_get_deploy, mock_plug_pro, mock_set_boot):
+                             mock_get_deploy, mock_set_boot):
         self.node.provision_state = states.DEPLOYING
         self.node.save()
+
+        vifs = {self.node.uuid: 'vif_uuid'}
+        mock_get_vifs.return_value = vifs
 
         with task_manager.acquire(self.context,
                                   self.node.uuid,
                                   shared=False) as task:
+            opts = pxe_utils.dhcp_options_for_instance(task)
             task.driver.boot.prepare_ramdisk(task, {'foo': 'bar'})
 
             mock_set_boot.assert_called_once_with(task, boot_devices.PXE)
-            mock_plug_pro.assert_called_once_with(mock.ANY, task)
+            mock_add_pro.assert_called_once_with(task)
             mock_get_deploy.assert_called_once_with(task.node)
             mock_build_pxe.assert_called_once_with(
                 task, mock_get_deploy.return_value)
@@ -172,9 +85,11 @@ class PXEBootTestCase(test_common.CIMCBaseTestCase):
                 CONF.pxe.pxe_config_template)
             mock_cache_ramdisk.assert_called_once_with(
                 task.context, task.node, mock_get_deploy.return_value)
+            mock_dhcp.assert_called_once_with(mock.ANY, task, opts, vifs)
 
     @mock.patch.object(pxe.PXEBoot, 'prepare_instance', autospec=True)
-    @mock.patch.object(boot.PXEBoot, '_unplug_provisioning', autospec=True)
+    @mock.patch.object(boot.network_provider, 'remove_provisioning_network',
+                       autospec=True)
     @with_task
     def test_prepare_instance(self, task, mock_unplug, mock_prepare):
         task.driver.boot.prepare_instance(task)
@@ -182,10 +97,11 @@ class PXEBootTestCase(test_common.CIMCBaseTestCase):
         self.assertFalse(mock_unplug.called)
 
     @mock.patch.object(pxe.PXEBoot, 'prepare_instance', autospec=True)
-    @mock.patch.object(boot.PXEBoot, '_unplug_provisioning', autospec=True)
+    @mock.patch.object(boot.network_provider, 'remove_provisioning_network',
+                       autospec=True)
     @with_task
     def test_prepare_instance_local(self, task, mock_unplug, mock_prepare):
         task.node.instance_info['capabilities'] = {"boot_option": "local"}
         task.driver.boot.prepare_instance(task)
         mock_prepare.assert_called_once_with(mock.ANY, task)
-        mock_unplug.assert_called_once_with(mock.ANY, task)
+        mock_unplug.assert_called_once_with(task)
