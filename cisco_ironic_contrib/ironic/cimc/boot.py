@@ -15,112 +15,40 @@
 import os
 import shutil
 
-
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import importutils
 
 from ironic.common import boot_devices
+from ironic.common import dhcp_factory
 from ironic.common import pxe_utils
 from ironic.common import states
-from ironic.conductor import utils as manager_utils
-from ironic.dhcp import neutron
 from ironic.drivers.modules import deploy_utils
 from ironic.drivers.modules import pxe
 from ironic import objects
 
-from cisco_ironic_contrib.ironic.cimc import common
+from cisco_ironic_contrib.ironic.cimc import network
 
 imcsdk = importutils.try_import('ImcSdk')
 
 CONF = cfg.CONF
 LOG = logging.getLogger(__name__)
 
+network_provider = network.NetworkProvider()
+
+
+def get_provisioning_vifs(task):
+    port_vifs = {}
+    for port in task.ports:
+        if port.extra['type'] != "deploy":
+            continue
+        vif = port.extra.get('vif_port_id')
+        if vif:
+            port_vifs[port.uuid] = vif
+    return port_vifs
+
 
 class PXEBoot(pxe.PXEBoot):
-
-    def _plug_provisioning(self, task, **kwargs):
-        LOG.debug("Plugging the provisioning!")
-        if task.node.power_state != states.POWER_ON:
-            manager_utils.node_power_action(task, states.REBOOT)
-
-        client = neutron._build_client(task.context.auth_token)
-        port = client.create_port({
-            'port': {
-                "network_id":
-                    CONF.neutron.cleaning_network_uuid,
-                "extra_dhcp_opts":
-                    pxe_utils.dhcp_options_for_instance(task),
-            }
-        })
-
-        vnic_id = 0
-        network = client.show_network(port['port']['network_id'])
-        seg_id = network['network']['provider:segmentation_id']
-
-        try:
-            common.add_vnic(
-                task, vnic_id, port['port']['mac_address'], seg_id, pxe=True)
-        except imcsdk.ImcException:
-            client.delete_port(port['port']['id'])
-            raise
-
-        new_port = objects.Port(
-            task.context, node_id=task.node.id,
-            address=port['port']['mac_address'],
-            extra={"vif_port_id": port['port']['id'],
-                   "vnic_id": 0,
-                   "type": "deploy", "state": "ACTIVE"})
-        new_port.create()
-        return port['port']['fixed_ips'][0]['ip_address']
-
-    def _plug_tenant_networks(self, task, **kwargs):
-        ports = objects.Port.list_by_node_id(task.context, task.node.id)
-        vnic_id = 0
-        for port in ports:
-            pargs = port['extra']
-            if pargs.get('type') == "tenant" and pargs['state'] == "DOWN":
-                try:
-                    common.add_vnic(
-                        task, vnic_id, port['address'],
-                        pargs['seg_id'], pxe=pargs['pxe'])
-                except imcsdk.ImcException:
-                    port.extra = {x: pargs[x] for x in pargs}
-                    port.extra['state'] = "ERROR"
-                    LOG.error("ADDING VNIC FAILED")
-                else:
-                    port.extra = {x: pargs[x] for x in pargs}
-                    port.extra['state'] = "UP"
-                    port.extra['vnic_id'] = vnic_id
-                    vnic_id = vnic_id + 1
-                    LOG.info("ADDING VNIC SUCCESSFUL")
-                port.save()
-
-    def _unplug_provisioning(self, task, **kwargs):
-        LOG.debug("Unplugging the provisioning!")
-        if task.node.power_state != states.POWER_ON:
-            manager_utils.node_power_action(task, states.REBOOT)
-
-        client = neutron._build_client(task.context.auth_token)
-
-        ports = objects.Port.list_by_node_id(task.context, task.node.id)
-        for port in ports:
-            if port['extra'].get('type') == "deploy":
-                common.delete_vnic(task, port['extra']['vnic_id'])
-                client.delete_port(port['extra']['vif_port_id'])
-                port.destroy()
-
-    def _unplug_tenant_networks(self, task, **kwargs):
-        ports = objects.Port.list_by_node_id(task.context, task.node.id)
-        for port in ports:
-            pargs = port['extra']
-            if pargs.get('type') == "tenant" and pargs['state'] == "UP":
-                common.delete_vnic(task, port['extra']['vnic_id'])
-                port.extra = {x: pargs[x] for x in pargs}
-                port.extra['state'] = "DOWN"
-                port.extra['vnic_id'] = None
-                port.save()
-                LOG.info("DELETEING VNIC SUCCESSFUL")
 
     def validate(self, task):
         pass
@@ -136,9 +64,11 @@ class PXEBoot(pxe.PXEBoot):
                 os.path.basename(CONF.pxe.ipxe_boot_script))
             shutil.copyfile(CONF.pxe.ipxe_boot_script, bootfile_path)
 
-        prov_ip = self._plug_provisioning(task)
+        network_provider.add_provisioning_network(task)
 
-        task.ports = objects.Port.list_by_node_id(task.context, node.id)
+        dhcp_opts = pxe_utils.dhcp_options_for_instance(task)
+        provider = dhcp_factory.DHCPFactory()
+        provider.update_dhcp(task, dhcp_opts, get_provisioning_vifs(task))
 
         pxe_info = pxe._get_deploy_image_info(node)
 
@@ -149,7 +79,6 @@ class PXEBoot(pxe.PXEBoot):
 
         pxe_options = pxe._build_pxe_config_options(task, pxe_info)
         pxe_options.update(ramdisk_params)
-        pxe_options['advertise_host'] = prov_ip
 
         if deploy_utils.get_boot_mode_for_deploy(node) == 'uefi':
             pxe_config_template = CONF.pxe.uefi_pxe_config_template
@@ -167,15 +96,15 @@ class PXEBoot(pxe.PXEBoot):
     def prepare_instance(self, task):
         super(PXEBoot, self).prepare_instance(task)
         if deploy_utils.get_boot_option(task.node) == "local":
-            self._unplug_provisioning(task)
-        self._plug_tenant_networks(task)
+            network_provider.remove_provisioning_network(task)
+        network_provider.configure_tenant_networks(task)
 
     def clean_up_ramdisk(self, task):
         super(PXEBoot, self).clean_up_ramdisk(task)
-        self._unplug_provisioning(task)
+        network_provider.remove_provisioning_network(task)
         task.ports = objects.Port.list_by_node_id(task.context, task.node.id)
 
     def clean_up_instance(self, task):
         super(PXEBoot, self).clean_up_instance(task)
-        self._unplug_tenant_networks(task)
+        network_provider.unconfigure_tenant_networks(task)
         task.ports = objects.Port.list_by_node_id(task.context, task.node.id)
