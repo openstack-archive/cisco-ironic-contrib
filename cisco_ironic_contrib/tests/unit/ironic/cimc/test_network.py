@@ -16,10 +16,10 @@ import mock
 
 from oslo_config import cfg
 
+from ironic.common import network as common_net
 from ironic.common import states
 from ironic.conductor import task_manager
 from ironic.conductor import utils as manager_utils
-from ironic.dhcp import neutron
 from ironic import objects
 from ironic.tests.unit.drivers.modules.cimc import test_common
 
@@ -45,7 +45,7 @@ class PXEBootTestCase(test_common.CIMCBaseTestCase):
     @mock.patch.object(manager_utils, 'node_power_action', autospec=True)
     @mock.patch.object(objects, 'Port', autospec=True)
     @mock.patch.object(common, 'add_vnic', autospec=True)
-    @mock.patch.object(neutron, '_build_client', autospec=True)
+    @mock.patch.object(common_net, 'get_neutron_client', autospec=True)
     @with_task
     def test_add_provisioning_network(self, task, mock__build_client,
                                       mock_add_vnic, mock_port, mock_power):
@@ -93,7 +93,7 @@ class PXEBootTestCase(test_common.CIMCBaseTestCase):
 
     @mock.patch.object(manager_utils, 'node_power_action', autospec=True)
     @mock.patch.object(objects, 'Port', autospec=True)
-    @mock.patch.object(neutron, '_build_client', autospec=True)
+    @mock.patch.object(common_net, 'get_neutron_client', autospec=True)
     @mock.patch.object(common, 'delete_vnic', autospec=True)
     @with_task
     def test_remove_provisioning_network(self, task, mock_delete_vnic,

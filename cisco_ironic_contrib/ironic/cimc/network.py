@@ -16,10 +16,10 @@ from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import importutils
 
+from ironic.common import network as common_net
 from ironic.common import states
 from ironic.conductor import utils as manager_utils
-from ironic.dhcp import neutron
-# from ironic.networks import base
+from ironic.networks import base
 from ironic import objects
 
 from cisco_ironic_contrib.ironic.cimc import common
@@ -30,18 +30,18 @@ CONF = cfg.CONF
 LOG = logging.getLogger(__name__)
 
 
-class NetworkProvider(object):  # base.NetworkProvider):
+class NetworkProvider(base.NetworkProvider):
 
     def add_provisioning_network(self, task):
         LOG.debug("Plugging the provisioning!")
         if task.node.power_state != states.POWER_ON:
             manager_utils.node_power_action(task, states.REBOOT)
 
-        client = neutron._build_client(task.context.auth_token)
+        client = common_net.get_neutron_client(task.context.auth_token)
         port = client.create_port({
             'port': {
                 "network_id":
-                    CONF.neutron.cleaning_network_uuid,
+                    CONF.provisioning_network_uuid,
             }
         })
 
@@ -70,7 +70,7 @@ class NetworkProvider(object):  # base.NetworkProvider):
         if task.node.power_state != states.POWER_ON:
             manager_utils.node_power_action(task, states.REBOOT)
 
-        client = neutron._build_client(task.context.auth_token)
+        client = common_net.get_neutron_client(task.context.auth_token)
 
         ports = objects.Port.list_by_node_id(task.context, task.node.id)
         for port in ports:
