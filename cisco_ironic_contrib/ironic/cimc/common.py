@@ -23,6 +23,19 @@ LOG = logging.getLogger(__name__)
 
 NUMBER_OF_UPLINKS = 2
 
+COMMON_PROPERTIES = {
+    'vPC': _('Is vPC enabled for this Node'),
+}
+
+
+def parse_driver_info(node):
+    info = common.parse_driver_info(node)
+    for param in COMMON_PROPERTIES:
+        prop = node.driver_info.get(param)
+        if prop:
+            info[param] = prop
+    return info
+
 
 def add_vnic(task, vnic_id, mac, vlan, pxe=False, uplink=None):
     name = "eth%d" % vnic_id
@@ -63,6 +76,8 @@ def add_vnic(task, vnic_id, mac, vlan, pxe=False, uplink=None):
         error = getattr(resp, 'error_code', None)
         if error:
             raise imcsdk.ImcException(node=task.node.uuid, error=error)
+        if not mac:
+            return resp.OutConfig._child[0].Mac
 
 
 def delete_vnic(task, vnic_id):
