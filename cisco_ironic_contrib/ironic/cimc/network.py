@@ -16,10 +16,10 @@ from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import importutils
 
+from ironic.common import network as common_net
 from ironic.common import states
 from ironic.conductor import utils as manager_utils
-from ironic.dhcp import neutron
-# from ironic.networks import base
+from ironic.networks import base
 from ironic import objects
 
 from cisco_ironic_contrib.ironic.cimc import common
@@ -29,19 +29,25 @@ imcsdk = importutils.try_import('ImcSdk')
 CONF = cfg.CONF
 LOG = logging.getLogger(__name__)
 
+STATE_UP = "UP"
+STATE_DOWN = "DOWN"
+STATE_ERROR = "ERROR"
 
-class NetworkProvider(object):  # base.NetworkProvider):
+TYPE_TENANT = "tenant"
+TYPE_PROVISIONING = "deploy"
+TYPE_CLEANING = "clean"
 
-    def add_provisioning_network(self, task):
-        LOG.debug("Plugging the provisioning!")
+
+class NetworkProvider(base.NetworkProvider):
+
+    def _add_network(self, task, network, typ):
         if task.node.power_state != states.POWER_ON:
             manager_utils.node_power_action(task, states.REBOOT)
 
-        client = neutron._build_client(task.context.auth_token)
+        client = common_net.get_neutron_client()
         port = client.create_port({
             'port': {
-                "network_id":
-                    CONF.neutron.cleaning_network_uuid,
+                "network_id": network,
             }
         })
 
@@ -59,43 +65,52 @@ class NetworkProvider(object):  # base.NetworkProvider):
         new_port = objects.Port(
             task.context, node_id=task.node.id,
             address=port['port']['mac_address'],
-            extra={"vif_port_id": port['port']['id'],
-                   "vnic_id": 0,
-                   "type": "deploy", "state": "ACTIVE"})
+            pxe_enabled=True,
+            extra={"vif_port_id": port['port']['id'], "vnic_id": 0,
+                   "type": typ, "state": STATE_UP})
         new_port.create()
         task.ports = objects.Port.list_by_node_id(task.context, task.node.id)
 
-    def remove_provisioning_network(self, task):
-        LOG.debug("Unplugging the provisioning!")
+    def _remove_network(self, task, typ):
         if task.node.power_state != states.POWER_ON:
             manager_utils.node_power_action(task, states.REBOOT)
 
-        client = neutron._build_client(task.context.auth_token)
+        client = common_net.get_neutron_client()
 
         ports = objects.Port.list_by_node_id(task.context, task.node.id)
         for port in ports:
-            if port['extra'].get('type') == "deploy":
+            if port['extra'].get('type') == typ:
                 common.delete_vnic(task, port['extra']['vnic_id'])
                 client.delete_port(port['extra']['vif_port_id'])
                 port.destroy()
+
+    def add_provisioning_network(self, task):
+        LOG.debug("Plugging the provisioning!")
+        self._add_network(task, CONF.provisioning_network_uuid,
+                          TYPE_PROVISIONING)
+
+    def remove_provisioning_network(self, task):
+        LOG.debug("Unplugging the provisioning!")
+        self._remove_network(task, TYPE_PROVISIONING)
 
     def configure_tenant_networks(self, task):
         ports = objects.Port.list_by_node_id(task.context, task.node.id)
         vnic_id = 0
         for port in ports:
             pargs = port['extra']
-            if pargs.get('type') == "tenant" and pargs['state'] == "DOWN":
+            if (pargs.get('type') == TYPE_TENANT and
+                    pargs['state'] == STATE_DOWN):
                 try:
                     common.add_vnic(
                         task, vnic_id, port['address'],
-                        pargs['seg_id'], pxe=pargs['pxe'])
+                        pargs['seg_id'], pxe=port['pxe_enabled'])
                 except imcsdk.ImcException:
                     port.extra = {x: pargs[x] for x in pargs}
-                    port.extra['state'] = "ERROR"
+                    port.extra['state'] = STATE_ERROR
                     LOG.error("ADDING VNIC FAILED")
                 else:
                     port.extra = {x: pargs[x] for x in pargs}
-                    port.extra['state'] = "UP"
+                    port.extra['state'] = STATE_UP
                     port.extra['vnic_id'] = vnic_id
                     vnic_id = vnic_id + 1
                     LOG.info("ADDING VNIC SUCCESSFUL")
@@ -105,16 +120,19 @@ class NetworkProvider(object):  # base.NetworkProvider):
         ports = objects.Port.list_by_node_id(task.context, task.node.id)
         for port in ports:
             pargs = port['extra']
-            if pargs.get('type') == "tenant" and pargs['state'] == "UP":
+            if pargs.get('type') == "tenant" and pargs['state'] == STATE_UP:
                 common.delete_vnic(task, port['extra']['vnic_id'])
                 port.extra = {x: pargs[x] for x in pargs}
-                port.extra['state'] = "DOWN"
+                port.extra['state'] = STATE_DOWN
                 port.extra['vnic_id'] = None
                 port.save()
                 LOG.info("DELETEING VNIC SUCCESSFUL")
 
     def add_cleaning_network(self, task):
-        pass
+        LOG.debug("Plugging the cleaning!")
+        self._add_network(task, CONF.neutron.cleaning_network_uuid,
+                          TYPE_CLEANING)
 
     def remove_cleaning_network(self, task):
-        pass
+        LOG.debug("Unplugging the cleaning!")
+        self._remove_network(task, TYPE_CLEANING)
