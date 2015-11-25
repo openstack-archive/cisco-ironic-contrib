@@ -46,6 +46,38 @@ class CIMCPXEVendorPassthruTestCase(test_common.CIMCBaseTestCase):
 
             mock_port.return_value.create.assert_called_once_with()
 
+    @mock.patch.object(objects, 'Portgroup', autospec=True)
+    @mock.patch.object(objects, 'Port', autospec=True)
+    def test_add_vnic_vpc(self, mock_port, mock_portgroup):
+        info = self.node.driver_info
+        info['vPC'] = True
+        info['uplink0:mac'] = "74:A2:E6:32:FA:04"
+        info['uplink1:mac'] = "74:A2:E6:32:FA:05"
+        self.node.driver_info = info
+        self.node.save()
+        with task_manager.acquire(self.context, self.node.uuid,
+                                  shared=False) as task:
+            mock_port.reset_mock()
+            task.driver.vendor.add_vnic(task, **TEST_DATA)
+            mock_portgroup.assert_called_once_with(
+                task.context, node_id=task.node.id, address=TEST_DATA['mac'],
+                extra={"vif_port_id": TEST_DATA['uuid']})
+
+            calls = []
+            calls.append(mock.call(
+                task.context, node_id=task.node.id,
+                address="74:A2:E6:32:FA:0B", pxe_enabled=False,
+                portgroup_id=mock_portgroup.return_value.id,
+                extra={"type": "tenant", "state": "DOWN", 'seg_id': 600}))
+            calls.append(mock.call().create())
+            calls.append(mock.call(
+                task.context, node_id=task.node.id,
+                address="74:A2:E6:32:FA:0C", pxe_enabled=False,
+                portgroup_id=mock_portgroup.return_value.id,
+                extra={"type": "tenant", "state": "DOWN", 'seg_id': 600}))
+            calls.append(mock.call().create())
+            mock_port.assert_has_calls(calls)
+
     @mock.patch.object(objects, 'Port', autospec=True)
     def test_delete_vnic(self, mock_port):
         with task_manager.acquire(self.context, self.node.uuid,
@@ -70,6 +102,43 @@ class CIMCPXEVendorPassthruTestCase(test_common.CIMCBaseTestCase):
                 task.context, task.node.id)
 
             port1.destroy.assert_called_once_with()
+
+    @mock.patch.object(objects, 'Portgroup', autospec=True)
+    @mock.patch.object(objects, 'Port', autospec=True)
+    def test_delete_vnic_vpc(self, mock_port, mock_portgroup):
+        info = self.node.driver_info
+        info['vPC'] = True
+        self.node.driver_info = info
+        self.node.save()
+        with task_manager.acquire(self.context, self.node.uuid,
+                                  shared=False) as task:
+            portgroup1 = mock.MagicMock()
+            portgroup1.__getitem__.return_value = {'vif_port_id': "1"}
+
+            portgroup2 = mock.MagicMock()
+            portgroup2.__getitem__.return_value = {'vif_port_id': "2"}
+
+            mock_portgroup.list_by_node_id.return_value = [portgroup1,
+                                                           portgroup2]
+
+            port1 = mock.MagicMock()
+            port1.__getitem__.return_value = {'vif_port_id': "1",
+                                              'state': 'DOWN'}
+
+            port2 = mock.MagicMock()
+            port2.__getitem__.return_value = {'vif_port_id': "2",
+                                              'state': 'DOWN'}
+
+            mock_port.list_by_portgroup_id.return_value = [port1, port2]
+
+            task.driver.vendor.delete_vnic(task, uuid="1")
+
+            mock_port.list_by_node_id.assert_called_with(
+                task.context, task.node.id)
+
+            portgroup1.destroy.assert_called_once_with()
+            port1.destroy.assert_called_once_with()
+            port2.destroy.assert_called_once_with()
 
     @mock.patch.object(objects, 'Port', autospec=True)
     def test_delete_vnic_port_not_found(self, mock_port):

@@ -101,14 +101,19 @@ class NetworkProvider(base.NetworkProvider):
             if (pargs.get('type') == TYPE_TENANT and
                     pargs['state'] == STATE_DOWN):
                 try:
-                    common.add_vnic(
-                        task, vnic_id, port['address'],
+                    address = None
+                    if port['address'] != "00:00:00:00:00:00":
+                        address = port['address']
+                    mac = common.add_vnic(
+                        task, vnic_id, address,
                         pargs['seg_id'], pxe=port['pxe_enabled'])
                 except imcsdk.ImcException:
                     port.extra = {x: pargs[x] for x in pargs}
                     port.extra['state'] = STATE_ERROR
                     LOG.error("ADDING VNIC FAILED")
                 else:
+                    if mac:
+                        port.address = mac
                     port.extra = {x: pargs[x] for x in pargs}
                     port.extra['state'] = STATE_UP
                     port.extra['vnic_id'] = vnic_id
