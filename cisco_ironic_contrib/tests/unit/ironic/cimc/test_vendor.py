@@ -40,8 +40,9 @@ class CIMCPXEVendorPassthruTestCase(test_common.CIMCBaseTestCase):
             task.driver.vendor.add_vnic(task, **TEST_DATA)
             mock_port.assert_called_once_with(
                 task.context, node_id=task.node.id, address=TEST_DATA['mac'],
+                pxe_enabled=False,
                 extra={"type": "tenant", "state": "DOWN", 'seg_id': 600,
-                       'pxe': False, "vif_port_id": TEST_DATA['uuid']})
+                       "vif_port_id": TEST_DATA['uuid']})
 
             mock_port.return_value.create.assert_called_once_with()
 
