@@ -36,8 +36,9 @@ class CIMCPXEVendorPassthru(iscsi_deploy.VendorPassthru):
         LOG.info("ADDING PORT TO IRONIC DB")
         new_port = objects.Port(
             task.context, node_id=task.node.id, address=kwargs['mac'],
+            pxe_enabled=kwargs['pxe'],
             extra={"vif_port_id": kwargs['uuid'], "seg_id": kwargs['vlan'],
-                   "pxe": kwargs['pxe'], "type": "tenant", "state": "DOWN"})
+                   "type": "tenant", "state": "DOWN"})
 
         new_port.create()
 

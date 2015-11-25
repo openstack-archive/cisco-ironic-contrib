@@ -21,26 +21,34 @@ from oslo_utils import importutils
 
 from ironic.common import boot_devices
 from ironic.common import dhcp_factory
+from ironic.common import network as common_net
 from ironic.common import pxe_utils
 from ironic.common import states
 from ironic.drivers.modules import deploy_utils
 from ironic.drivers.modules import pxe
 from ironic import objects
 
-from cisco_ironic_contrib.ironic.cimc import network
-
 imcsdk = importutils.try_import('ImcSdk')
 
 CONF = cfg.CONF
 LOG = logging.getLogger(__name__)
-
-network_provider = network.NetworkProvider()
 
 
 def get_provisioning_vifs(task):
     port_vifs = {}
     for port in task.ports:
         if port.extra['type'] != "deploy":
+            continue
+        vif = port.extra.get('vif_port_id')
+        if vif:
+            port_vifs[port.uuid] = vif
+    return port_vifs
+
+
+def get_cleaning_vifs(task):
+    port_vifs = {}
+    for port in task.ports:
+        if port.extra['type'] != "clean":
             continue
         vif = port.extra.get('vif_port_id')
         if vif:
@@ -64,11 +72,19 @@ class PXEBoot(pxe.PXEBoot):
                 os.path.basename(CONF.pxe.ipxe_boot_script))
             shutil.copyfile(CONF.pxe.ipxe_boot_script, bootfile_path)
 
-        network_provider.add_provisioning_network(task)
-
+        net_provider = common_net.get_network_provider(
+            task.node.network_provider)
         dhcp_opts = pxe_utils.dhcp_options_for_instance(task)
         provider = dhcp_factory.DHCPFactory()
-        provider.update_dhcp(task, dhcp_opts, get_provisioning_vifs(task))
+
+        if node.provision_state == states.CLEANING:
+            net_provider.add_cleaning_network(task)
+            vifs = get_cleaning_vifs(task)
+        else:
+            net_provider.add_provisioning_network(task)
+            vifs = get_provisioning_vifs(task)
+
+        provider.update_dhcp(task, dhcp_opts, vifs)
 
         pxe_info = pxe._get_deploy_image_info(node)
 
@@ -95,16 +111,23 @@ class PXEBoot(pxe.PXEBoot):
 
     def prepare_instance(self, task):
         super(PXEBoot, self).prepare_instance(task)
+        net_provider = common_net.get_network_provider(
+            task.node.network_provider)
         if deploy_utils.get_boot_option(task.node) == "local":
-            network_provider.remove_provisioning_network(task)
-        network_provider.configure_tenant_networks(task)
+            net_provider.remove_provisioning_network(task)
+        net_provider.configure_tenant_networks(task)
 
     def clean_up_ramdisk(self, task):
         super(PXEBoot, self).clean_up_ramdisk(task)
-        network_provider.remove_provisioning_network(task)
+        net_provider = common_net.get_network_provider(
+            task.node.network_provider)
+        net_provider.remove_provisioning_network(task)
+        net_provider.remove_cleaning_network(task)
         task.ports = objects.Port.list_by_node_id(task.context, task.node.id)
 
     def clean_up_instance(self, task):
         super(PXEBoot, self).clean_up_instance(task)
-        network_provider.unconfigure_tenant_networks(task)
+        net_provider = common_net.get_network_provider(
+            task.node.network_provider)
+        net_provider.unconfigure_tenant_networks(task)
         task.ports = objects.Port.list_by_node_id(task.context, task.node.id)
