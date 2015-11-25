@@ -84,6 +84,7 @@ class PXEBootTestCase(test_common.CIMCBaseTestCase):
             task, 0, 'fake_address', 600, True)
         mock_port.assert_called_once_with(task.context, node_id=task.node.id,
                                           address='fake_address',
+                                          pxe_enabled=True,
                                           extra={
                                               "vif_port_id": 'fake_id',
                                               "type": "deploy",

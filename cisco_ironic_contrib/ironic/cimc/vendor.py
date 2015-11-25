@@ -33,28 +33,72 @@ class CIMCPXEVendorPassthru(iscsi_deploy.VendorPassthru):
     @base.passthru(['POST'], async=True)
     @task_manager.require_exclusive_lock
     def add_vnic(self, task, **kwargs):
-        LOG.info("ADDING PORT TO IRONIC DB")
-        new_port = objects.Port(
-            task.context, node_id=task.node.id, address=kwargs['mac'],
-            extra={"vif_port_id": kwargs['uuid'], "seg_id": kwargs['vlan'],
-                   "pxe": kwargs['pxe'], "type": "tenant", "state": "DOWN"})
+        vPc = False
+        if not vPc:
+            new_port = objects.Port(
+                task.context, node_id=task.node.id, address=kwargs['mac'],
+                pxe_enabled=kwargs['pxe'],
+                extra={"vif_port_id": kwargs['uuid'], "seg_id": kwargs['vlan'],
+                       "type": "tenant", "state": "DOWN"})
 
-        new_port.create()
+            new_port.create()
+        else:
+            port_group = objects.Portgroup(
+                task.context, node_id=task.node.id, address=kwargs['mac'],
+                extra={"vif_port_id": kwargs['uuid']})
+
+            port_group.create()
+
+            new_port = objects.Port(
+                task.context, node_id=task.node.id, address="None",
+                portgroup_id=port_group.id, pxe_enabled=kwargs['pxe'],
+                extra={"seg_id": kwargs['vlan'], "type": "tenant",
+                       "state": "DOWN"})
+
+            new_port2 = objects.Port(
+                task.context, node_id=task.node.id, address="None",
+                portgroup_id=port_group.id, pxe_enabled=kwargs['pxe'],
+                extra={"seg_id": kwargs['vlan'], "type": "tenant",
+                       "state": "DOWN"})
+
+            new_port.create()
+            new_port2.create()
 
     @base.passthru(['POST'], async=True)
     @task_manager.require_exclusive_lock
     def delete_vnic(self, task, **kwargs):
-        # Use neutron UUID to get port from ironic DB
-        ports = objects.Port.list_by_node_id(task.context, task.node.id)
-        todelete = None
-        for port in ports:
-            if (port['extra']['vif_port_id'] == kwargs['uuid'] and
-                    port['extra']['state'] == "DOWN"):
-                todelete = port
-                break
+        vPc = False
+        if not vPc:
+            # Use neutron UUID to get port from ironic DB
+            ports = objects.Port.list_by_node_id(task.context, task.node.id)
+            todelete = None
+            for port in ports:
+                if (port['extra']['vif_port_id'] == kwargs['uuid'] and
+                        port['extra']['state'] == "DOWN"):
+                    todelete = port
+                    break
 
-        if todelete is None:
-            raise exception.NotFound("No port matched uuid provided")
+            if todelete is None:
+                raise exception.NotFound("No port matched uuid provided")
 
-        # Delete from DB
-        todelete.destroy()
+            # Delete from DB
+            todelete.destroy()
+        else:
+            portgroups = objects.Portgroup.list_by_node_id(task.context,
+                                                           task.node.id)
+            grouptodelete = None
+            for portgroup in portgroups:
+                if (portgroup['extra']['vif_port_id'] == kwargs['uuid']):
+                    grouptodelete = portgroup
+                    break
+
+            ports = objects.Port.list_by_portgroup_id(task.context,
+                                                      grouptodelete.id)
+            for port in ports:
+                if port['extra']['state'] == "DOWN":
+                    port.destroy()
+                else:
+                    port['port_group_id'] = None
+                    port.save()
+
+            grouptodelete.destroy()

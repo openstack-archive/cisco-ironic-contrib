@@ -59,8 +59,8 @@ class NetworkProvider(base.NetworkProvider):
         new_port = objects.Port(
             task.context, node_id=task.node.id,
             address=port['port']['mac_address'],
-            extra={"vif_port_id": port['port']['id'],
-                   "vnic_id": 0,
+            pxe_enabled=True,
+            extra={"vif_port_id": port['port']['id'], "vnic_id": 0,
                    "type": "deploy", "state": "ACTIVE"})
         new_port.create()
         task.ports = objects.Port.list_by_node_id(task.context, task.node.id)
@@ -88,7 +88,7 @@ class NetworkProvider(base.NetworkProvider):
                 try:
                     common.add_vnic(
                         task, vnic_id, port['address'],
-                        pargs['seg_id'], pxe=pargs['pxe'])
+                        pargs['seg_id'], pxe=port['pxe_enabled'])
                 except imcsdk.ImcException:
                     port.extra = {x: pargs[x] for x in pargs}
                     port.extra['state'] = "ERROR"
