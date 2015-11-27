@@ -28,8 +28,21 @@ imcsdk = importutils.try_import('ImcSdk')
 CONF = cfg.CONF
 
 
+class BaseTestCase(test_common.CIMCBaseTestCase):
+
+    def setUp(self):
+        super(BaseTestCase, self).setUp()
+        info = self.node.driver_info
+        info['uplinks'] = 2
+        info['uplink0-mac'] = "74:A2:E6:D5:20:77"
+        info['uplink1-mac'] = "74:A2:E6:D5:20:78"
+        self.node.network_provider = "cimc_network_provider"
+        self.node.driver_info = info
+        self.node.save()
+
+
 @mock.patch.object(cimc_common, 'cimc_handle', autospec=True)
-class AddVnicTestCase(test_common.CIMCBaseTestCase):
+class AddVnicTestCase(BaseTestCase):
 
     def _test_add_vnic(self, mock_mo, mock_handle, pxe=False):
         with task_manager.acquire(self.context, self.node.uuid,
@@ -84,7 +97,7 @@ class AddVnicTestCase(test_common.CIMCBaseTestCase):
 
 
 @mock.patch.object(cimc_common, 'cimc_handle', autospec=True)
-class DeleteVnicTestCase(test_common.CIMCBaseTestCase):
+class DeleteVnicTestCase(BaseTestCase):
 
     def test_delete_vnic(self, mock_handle):
         with task_manager.acquire(self.context, self.node.uuid,
