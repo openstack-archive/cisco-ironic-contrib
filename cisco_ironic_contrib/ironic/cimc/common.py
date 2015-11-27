@@ -16,20 +16,31 @@ from oslo_log import log as logging
 from oslo_utils import importutils
 
 from ironic.drivers.modules.cimc import common
+from ironic.drivers.modules import deploy_utils
 
 imcsdk = importutils.try_import('ImcSdk')
 
 LOG = logging.getLogger(__name__)
 
-NUMBER_OF_UPLINKS = 2
+REQUIRED_PROPERTIES = {
+    'uplinks': _('Uplinks availible on this node'),
+}
 
 COMMON_PROPERTIES = {
     'vPC': _('Is vPC enabled for this Node'),
 }
+COMMON_PROPERTIES.update(REQUIRED_PROPERTIES)
 
 
 def parse_driver_info(node):
     info = common.parse_driver_info(node)
+    for param in REQUIRED_PROPERTIES:
+        info[param] = node.driver_info.get(param)
+    error_msg = (_("%s driver requires these parameters to be set in the "
+                   "node's driver_info.") %
+                 node.driver)
+    deploy_utils.check_for_missing_params(info, error_msg)
+
     for param in COMMON_PROPERTIES:
         prop = node.driver_info.get(param)
         if prop:
@@ -38,8 +49,9 @@ def parse_driver_info(node):
 
 
 def add_vnic(task, vnic_id, mac, vlan, pxe=False, uplink=None):
+    info = parse_driver_info(task.node)
     name = "eth%d" % vnic_id
-    uplink = uplink if uplink else vnic_id % NUMBER_OF_UPLINKS
+    uplink = uplink if uplink else vnic_id % info['uplinks']
     with common.cimc_handle(task) as handle:
         rackunit = handle.get_imc_managedobject(
             None, imcsdk.ComputeRackUnit.class_id())
@@ -81,7 +93,8 @@ def add_vnic(task, vnic_id, mac, vlan, pxe=False, uplink=None):
 
 
 def delete_vnic(task, vnic_id):
-    if vnic_id < NUMBER_OF_UPLINKS:
+    info = parse_driver_info(task.node)
+    if vnic_id < info['uplinks']:
         clean_vnic(task, vnic_id)
     else:
         name = "eth%d" % vnic_id

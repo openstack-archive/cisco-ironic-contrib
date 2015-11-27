@@ -53,20 +53,13 @@ class CIMCPXEVendorPassthru(iscsi_deploy.VendorPassthru):
 
             port_group.create()
 
-            new_port = objects.Port(
-                task.context, node_id=task.node.id, address=NULL_ADDRESS,
-                portgroup_id=port_group.id, pxe_enabled=kwargs['pxe'],
-                extra={"seg_id": kwargs['vlan'], "type": "tenant",
-                       "state": "DOWN"})
-
-            new_port2 = objects.Port(
-                task.context, node_id=task.node.id, address=NULL_ADDRESS,
-                portgroup_id=port_group.id, pxe_enabled=kwargs['pxe'],
-                extra={"seg_id": kwargs['vlan'], "type": "tenant",
-                       "state": "DOWN"})
-
-            new_port.create()
-            new_port2.create()
+            for n in range(0, info['uplinks']):
+                new_port = objects.Port(
+                    task.context, node_id=task.node.id, address=NULL_ADDRESS,
+                    portgroup_id=port_group.id, pxe_enabled=kwargs['pxe'],
+                    extra={"seg_id": kwargs['vlan'], "type": "tenant",
+                           "state": "DOWN"})
+                new_port.create()
 
     @base.passthru(['POST'], async=True)
     @task_manager.require_exclusive_lock

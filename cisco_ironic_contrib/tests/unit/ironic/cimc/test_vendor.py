@@ -19,7 +19,8 @@ from oslo_utils import importutils
 from ironic.common import exception
 from ironic.conductor import task_manager
 from ironic import objects
-from ironic.tests.unit.drivers.modules.cimc import test_common
+
+from cisco_ironic_contrib.tests.unit.ironic.cimc import test_common
 
 imcsdk = importutils.try_import('ImcSdk')
 
@@ -31,7 +32,7 @@ TEST_DATA = {
 }
 
 
-class CIMCPXEVendorPassthruTestCase(test_common.CIMCBaseTestCase):
+class CIMCPXEVendorPassthruTestCase(test_common.BaseTestCase):
 
     @mock.patch.object(objects, 'Port', autospec=True)
     def test_add_vnic(self, mock_port):
@@ -67,12 +68,12 @@ class CIMCPXEVendorPassthruTestCase(test_common.CIMCBaseTestCase):
                 address="00:00:00:00:00:00", pxe_enabled=False,
                 portgroup_id=mock_portgroup.return_value.id,
                 extra={"type": "tenant", "state": "DOWN", 'seg_id': 600}))
+            calls.append(mock.call().create())
             calls.append(mock.call(
                 task.context, node_id=task.node.id,
                 address="00:00:00:00:00:00", pxe_enabled=False,
                 portgroup_id=mock_portgroup.return_value.id,
                 extra={"type": "tenant", "state": "DOWN", 'seg_id': 600}))
-            calls.append(mock.call().create())
             calls.append(mock.call().create())
             mock_port.assert_has_calls(calls)
 
