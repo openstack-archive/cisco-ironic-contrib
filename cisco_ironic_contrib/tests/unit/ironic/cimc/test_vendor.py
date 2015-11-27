@@ -19,7 +19,8 @@ from oslo_utils import importutils
 from ironic.common import exception
 from ironic.conductor import task_manager
 from ironic import objects
-from ironic.tests.unit.drivers.modules.cimc import test_common
+
+from cisco_ironic_contrib.tests.unit.ironic.cimc import test_common
 
 imcsdk = importutils.try_import('ImcSdk')
 
@@ -31,7 +32,7 @@ TEST_DATA = {
 }
 
 
-class CIMCPXEVendorPassthruTestCase(test_common.CIMCBaseTestCase):
+class CIMCPXEVendorPassthruTestCase(test_common.BaseTestCase):
 
     @mock.patch.object(objects, 'Port', autospec=True)
     def test_add_vnic(self, mock_port):
@@ -51,13 +52,12 @@ class CIMCPXEVendorPassthruTestCase(test_common.CIMCBaseTestCase):
     def test_add_vnic_vpc(self, mock_port, mock_portgroup):
         info = self.node.driver_info
         info['vPC'] = True
-        info['uplink0-mac'] = "74:A2:E6:32:FA:04"
-        info['uplink1-mac'] = "74:A2:E6:32:FA:05"
         self.node.driver_info = info
         self.node.save()
         with task_manager.acquire(self.context, self.node.uuid,
                                   shared=False) as task:
             mock_port.reset_mock()
+            mock_portgroup.list_by_node_id.return_value = []
             task.driver.vendor.add_vnic(task, **TEST_DATA)
             mock_portgroup.assert_called_once_with(
                 task.context, node_id=task.node.id, address=TEST_DATA['mac'],
@@ -66,13 +66,44 @@ class CIMCPXEVendorPassthruTestCase(test_common.CIMCBaseTestCase):
             calls = []
             calls.append(mock.call(
                 task.context, node_id=task.node.id,
-                address="74:a2:e6:32:fa:0b", pxe_enabled=False,
+                address="74:a2:e6:d5:20:7e", pxe_enabled=False,
                 portgroup_id=mock_portgroup.return_value.id,
                 extra={"type": "tenant", "state": "DOWN", 'seg_id': 600}))
             calls.append(mock.call().create())
             calls.append(mock.call(
                 task.context, node_id=task.node.id,
-                address="74:a2:e6:32:fa:0c", pxe_enabled=False,
+                address="74:a2:e6:d5:20:7f", pxe_enabled=False,
+                portgroup_id=mock_portgroup.return_value.id,
+                extra={"type": "tenant", "state": "DOWN", 'seg_id': 600}))
+            calls.append(mock.call().create())
+            mock_port.assert_has_calls(calls)
+
+    @mock.patch.object(objects, 'Portgroup', autospec=True)
+    @mock.patch.object(objects, 'Port', autospec=True)
+    def test_add_vnic_vpc_second_port_group(self, mock_port, mock_portgroup):
+        info = self.node.driver_info
+        info['vPC'] = True
+        self.node.driver_info = info
+        self.node.save()
+        with task_manager.acquire(self.context, self.node.uuid,
+                                  shared=False) as task:
+            mock_port.reset_mock()
+            mock_portgroup.list_by_node_id.return_value = ["Portgroup"]
+            task.driver.vendor.add_vnic(task, **TEST_DATA)
+            mock_portgroup.assert_called_once_with(
+                task.context, node_id=task.node.id, address=TEST_DATA['mac'],
+                extra={"vif_port_id": TEST_DATA['uuid']})
+
+            calls = []
+            calls.append(mock.call(
+                task.context, node_id=task.node.id,
+                address="74:a2:e6:d5:20:80", pxe_enabled=False,
+                portgroup_id=mock_portgroup.return_value.id,
+                extra={"type": "tenant", "state": "DOWN", 'seg_id': 600}))
+            calls.append(mock.call().create())
+            calls.append(mock.call(
+                task.context, node_id=task.node.id,
+                address="74:a2:e6:d5:20:81", pxe_enabled=False,
                 portgroup_id=mock_portgroup.return_value.id,
                 extra={"type": "tenant", "state": "DOWN", 'seg_id': 600}))
             calls.append(mock.call().create())
