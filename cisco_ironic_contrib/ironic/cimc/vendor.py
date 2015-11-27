@@ -34,7 +34,7 @@ LOG = logging.getLogger(__name__)
 
 class CIMCPXEVendorPassthru(iscsi_deploy.VendorPassthru):
 
-    @base.passthru(['POST'], async=True)
+    @base.passthru(['POST'], async=False)
     @task_manager.require_exclusive_lock
     def add_vnic(self, task, **kwargs):
         info = common.parse_driver_info(task.node)
@@ -47,20 +47,21 @@ class CIMCPXEVendorPassthru(iscsi_deploy.VendorPassthru):
 
             new_port.create()
         else:
+            n_of_pgs = len(objects.Portgroup.list_by_node_id(task.context,
+                                                             task.node.id))
+
+            pg_extra = {"vif_port_id": kwargs['uuid']}
             port_group = objects.Portgroup(
                 task.context, node_id=task.node.id, address=kwargs['mac'],
                 extra={"vif_port_id": kwargs['uuid']})
             port_group.create()
-
-            n_of_pgs = len(objects.Portgroup.list_by_node_id(task.context,
-                                                             task.node.id))
-
-            uplink_mac = netaddr.EUI(task.node.driver_info.get('uplink0-mac'))
-            for uplink in range(0, common.NUMBER_OF_UPLINKS):
+            
+            uplink_mac = netaddr.EUI(info['uplink0-mac'])
+            for uplink in range(0, info['uplinks']):
                 mac_addr = netaddr.EUI(int(uplink_mac) + 1 +
-                                       common.NUMBER_OF_UPLINKS +
-                                       (common.NUMBER_OF_UPLINKS * 2) +
-                                       (n_of_pgs * common.NUMBER_OF_UPLINKS) +
+                                       info['uplinks'] +
+                                       (info['uplinks'] * 2) +
+                                       (n_of_pgs * info['uplinks']) +
                                        uplink,
                                        dialect=netaddr.mac_unix_expanded)
 
@@ -71,7 +72,7 @@ class CIMCPXEVendorPassthru(iscsi_deploy.VendorPassthru):
                            "state": "DOWN"})
                 new_port.create()
 
-    @base.passthru(['POST'], async=True)
+    @base.passthru(['POST'], async=False)
     @task_manager.require_exclusive_lock
     def delete_vnic(self, task, **kwargs):
         info = common.parse_driver_info(task.node)
