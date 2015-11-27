@@ -19,7 +19,8 @@ from oslo_utils import importutils
 from ironic.common import exception
 from ironic.conductor import task_manager
 from ironic import objects
-from ironic.tests.unit.drivers.modules.cimc import test_common
+
+from cisco_ironic_contrib.tests.unit.ironic.cimc import test_common
 
 imcsdk = importutils.try_import('ImcSdk')
 
@@ -31,7 +32,7 @@ TEST_DATA = {
 }
 
 
-class CIMCPXEVendorPassthruTestCase(test_common.CIMCBaseTestCase):
+class CIMCPXEVendorPassthruTestCase(test_common.BaseTestCase):
 
     @mock.patch.object(objects, 'Port', autospec=True)
     def test_add_vnic(self, mock_port):

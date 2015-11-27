@@ -21,10 +21,10 @@ from ironic.common import states
 from ironic.conductor import task_manager
 from ironic.conductor import utils as manager_utils
 from ironic import objects
-from ironic.tests.unit.drivers.modules.cimc import test_common
 
 from cisco_ironic_contrib.ironic.cimc import common
 from cisco_ironic_contrib.ironic.cimc import network
+from cisco_ironic_contrib.tests.unit.ironic.cimc import test_common
 
 CONF = cfg.CONF
 
@@ -40,7 +40,7 @@ def with_task(func):
     return wrapper
 
 
-class PXEBootTestCase(test_common.CIMCBaseTestCase):
+class PXEBootTestCase(test_common.BaseTestCase):
 
     @mock.patch.object(manager_utils, 'node_power_action', autospec=True)
     @mock.patch.object(objects, 'Port', autospec=True)
