@@ -56,11 +56,11 @@ class CIMCPXEVendorPassthru(iscsi_deploy.VendorPassthru):
                                                              task.node.id))
 
             uplink_mac = netaddr.EUI(task.node.driver_info.get('uplink0-mac'))
-            for uplink in range(0, common.NUMBER_OF_UPLINKS):
+            for uplink in range(0, info['uplinks']):
                 mac_addr = netaddr.EUI(int(uplink_mac) + 1 +
-                                       common.NUMBER_OF_UPLINKS +
-                                       (common.NUMBER_OF_UPLINKS * 2) +
-                                       (n_of_pgs * common.NUMBER_OF_UPLINKS) +
+                                       info['uplinks'] +
+                                       (info['uplinks'] * 2) +
+                                       (n_of_pgs * info['uplinks']) +
                                        uplink)
 
                 new_port = objects.Port(
