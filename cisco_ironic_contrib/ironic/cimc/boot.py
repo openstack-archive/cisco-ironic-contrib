@@ -21,12 +21,15 @@ from oslo_utils import importutils
 
 from ironic.common import boot_devices
 from ironic.common import dhcp_factory
+from ironic.common import exception
 from ironic.common import network as common_net
 from ironic.common import pxe_utils
 from ironic.common import states
 from ironic.drivers.modules import deploy_utils
 from ironic.drivers.modules import pxe
 from ironic import objects
+
+from cisco_ironic_contrib.ironic.cimc import common
 
 imcsdk = importutils.try_import('ImcSdk')
 
@@ -59,7 +62,11 @@ def get_cleaning_vifs(task):
 class PXEBoot(pxe.PXEBoot):
 
     def validate(self, task):
-        pass
+        common.parse_driver_info(task.node)
+        provider = task.node.network_provider or CONF.network_provider
+        if provider != "cimc_network_provider":
+            raise exception.MissingParameterValue("Network Provider must be"
+                                                  "cimc_network_provider")
 
     def prepare_ramdisk(self, task, ramdisk_params):
         node = task.node
