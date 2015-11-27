@@ -24,7 +24,8 @@ from ironic.conductor import task_manager
 from ironic.drivers.modules import deploy_utils
 from ironic.drivers.modules import pxe
 from ironic.objects import port
-from ironic.tests.unit.drivers.modules.cimc import test_common
+
+from cisco_ironic_contrib.tests.unit.ironic.cimc import test_common
 
 from cisco_ironic_contrib.ironic.cimc import boot
 from cisco_ironic_contrib.ironic.cimc import network
@@ -35,8 +36,6 @@ CONF = cfg.CONF
 def with_task(func):
 
     def wrapper(self, *args, **kwargs):
-        self.node.network_provider = "cimc_network_provider"
-        self.node.save()
         with task_manager.acquire(self.context,
                                   self.node.uuid,
                                   shared=False) as task:
@@ -45,7 +44,7 @@ def with_task(func):
     return wrapper
 
 
-class GetProvisioningVifsTestCase(test_common.CIMCBaseTestCase):
+class GetProvisioningVifsTestCase(test_common.BaseTestCase):
 
     @with_task
     def test_get_provisioning_vifs(self, task):
@@ -96,7 +95,7 @@ class GetProvisioningVifsTestCase(test_common.CIMCBaseTestCase):
         self.assertEqual({}, vifs)
 
 
-class PXEBootTestCase(test_common.CIMCBaseTestCase):
+class PXEBootTestCase(test_common.BaseTestCase):
 
     @with_task
     def test_validate(self, task):
