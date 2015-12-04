@@ -61,7 +61,7 @@ class CIMCPXEVendorPassthruTestCase(test_common.BaseTestCase):
             task.driver.vendor.add_vnic(task, **TEST_DATA)
             mock_portgroup.assert_called_once_with(
                 task.context, node_id=task.node.id, address=TEST_DATA['mac'],
-                extra={"vif_port_id": TEST_DATA['uuid']})
+                extra={"vif_port_id": TEST_DATA['uuid'], "mode": 4})
 
             calls = []
             calls.append(mock.call(
@@ -92,7 +92,7 @@ class CIMCPXEVendorPassthruTestCase(test_common.BaseTestCase):
             task.driver.vendor.add_vnic(task, **TEST_DATA)
             mock_portgroup.assert_called_once_with(
                 task.context, node_id=task.node.id, address=TEST_DATA['mac'],
-                extra={"vif_port_id": TEST_DATA['uuid']})
+                extra={"vif_port_id": TEST_DATA['uuid'], "mode": 0})
 
             calls = []
             calls.append(mock.call(
