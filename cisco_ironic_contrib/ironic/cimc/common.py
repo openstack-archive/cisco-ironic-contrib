@@ -15,6 +15,8 @@
 from oslo_log import log as logging
 from oslo_utils import importutils
 
+from ironic.common import exception
+
 from ironic.drivers.modules.cimc import common
 from ironic.drivers.modules import deploy_utils
 
@@ -93,7 +95,7 @@ def add_vnic(task, vnic_id, mac, vlan, pxe=False, uplink=None):
             method, imcsdk.WriteXmlOption.DIRTY)
         error = getattr(resp, 'error_code', None)
         if error:
-            raise imcsdk.ImcException(node=task.node.uuid, error=error)
+            raise exception.CIMCException(node=task.node.uuid, error=error)
         if not mac:
             return resp.OutConfig._child[0].Mac
 
