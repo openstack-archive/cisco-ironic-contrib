@@ -52,7 +52,8 @@ class CIMCPXEVendorPassthru(iscsi_deploy.VendorPassthru):
 
             port_group = objects.Portgroup(
                 task.context, node_id=task.node.id, address=kwargs['mac'],
-                extra={"vif_port_id": kwargs['uuid']})
+                extra={"vif_port_id": kwargs['uuid'],
+                       "mode": 4 if n_of_pgs == 0 else 0})
             port_group.create()
 
             uplink_mac = netaddr.EUI(info['uplink0-mac'])
