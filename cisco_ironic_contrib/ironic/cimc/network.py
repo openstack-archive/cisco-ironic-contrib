@@ -100,10 +100,16 @@ class NetworkProvider(base.NetworkProvider):
             pargs = port['extra']
             if (pargs.get('type') == TYPE_TENANT and
                     pargs['state'] == STATE_DOWN):
+                vlan = pargs['seg_id']
+                pg_id = port['portgroup_id']
+                if pg_id is not None:
+                    pg = objects.Portgroup.get(task.context, pg_id)
+                    if pg['extra'].get('mode', 0) == 4:
+                        vlan = None
                 try:
                     common.add_vnic(
                         task, vnic_id, port['address'],
-                        pargs['seg_id'], pxe=port['pxe_enabled'])
+                        vlan, pxe=port['pxe_enabled'])
                 except imcsdk.ImcException:
                     port.extra = {x: pargs[x] for x in pargs}
                     port.extra['state'] = STATE_ERROR

@@ -1,0 +1,151 @@
+diff --git a/nova/api/metadata/base.py b/nova/api/metadata/base.py
+index aa1ad39..ea7c6a0 100644
+--- a/nova/api/metadata/base.py
++++ b/nova/api/metadata/base.py
+@@ -106,7 +106,8 @@ class InstanceMetadata(object):
+     """Instance metadata."""
+ 
+     def __init__(self, instance, address=None, content=None, extra_md=None,
+-                 network_info=None, vd_driver=None, network_metadata=None):
++                 network_info=None, vd_driver=None, network_metadata=None,
++                 portgroup_info=None):
+         """Creation of this object should basically cover all time consuming
+         collection.  Methods after that should not cause time delays due to
+         network operations or lengthy cpu operations.
+@@ -155,7 +156,8 @@ class InstanceMetadata(object):
+ 
+         # expose network metadata
+         if network_metadata is None:
+-            self.network_metadata = netutils.get_network_metadata(network_info)
++            self.network_metadata = netutils.get_network_metadata(
++                network_info, portgroup_info)
+         else:
+             self.network_metadata = network_metadata
+ 
+diff --git a/nova/virt/ironic/driver.py b/nova/virt/ironic/driver.py
+index d4551c3..b9159af 100644
+--- a/nova/virt/ironic/driver.py
++++ b/nova/virt/ironic/driver.py
+@@ -680,12 +680,25 @@ class IronicDriver(virt_driver.ComputeDriver):
+             None means 'no constraints', a set means 'these and only these
+             MAC addresses'.
+         """
+-        try:
+-            node = self.ironicclient.call("node.get", instance.node)
+-        except ironic.exc.NotFound:
+-            return None
+-        ports = self.ironicclient.call("node.list_ports", node.uuid)
+-        return set([p.address for p in ports])
++        #try:
++        #    node = self.ironicclient.call("node.get", instance.node)
++        #except ironic.exc.NotFound:
++        #    return None
++        #ports = self.ironicclient.call("node.list_ports", node.uuid)
++        #return set([p.address for p in ports])
++        return ['74:a0:2f:42:69:d5', 'fa:16:3e:52:c1:bf']
++
++    def _get_portgroup_info(self, node):
++        pgs = self.ironicclient.call("node.list_portgroups", node.uuid,
++                                      detail=True)
++        ports = self.ironicclient.call("node.list_ports", node.uuid,
++                                       detail=True)
++        for pg in pgs:
++            pg.bond_links = []
++            for port in ports:
++                if port.portgroup_uuid == pg.uuid:
++                    pg.bond_links.append(port)
++        return pgs
+ 
+     def _generate_configdrive(self, instance, node, network_info,
+                               extra_md=None, files=None):
+@@ -704,7 +717,8 @@ class IronicDriver(virt_driver.ComputeDriver):
+             extra_md = {}
+ 
+         i_meta = instance_metadata.InstanceMetadata(instance,
+-            content=files, extra_md=extra_md, network_info=network_info)
++            content=files, extra_md=extra_md, network_info=network_info,
++            portgroup_info=self._get_portgroup_info(node))
+ 
+         with tempfile.NamedTemporaryFile() as uncompressed:
+             try:
+diff --git a/nova/virt/netutils.py b/nova/virt/netutils.py
+index 4a53f4a..6bc526e 100644
+--- a/nova/virt/netutils.py
++++ b/nova/virt/netutils.py
+@@ -179,7 +179,7 @@ def get_injected_network_template(network_info, use_ipv6=None, template=None,
+                             'libvirt_virt_type': libvirt_virt_type})
+ 
+ 
+-def get_network_metadata(network_info, use_ipv6=None):
++def get_network_metadata(network_info, portgroup_info, use_ipv6=None):
+     """Gets a more complete representation of the instance network information.
+ 
+     This data is exposed as network_data.json in the metadata service and
+@@ -205,6 +205,18 @@ def get_network_metadata(network_info, use_ipv6=None):
+     services = []
+     ifc_num = -1
+     net_num = -1
++    bond_num = -1
++
++    for pg in portgroup_info:
++        if pg.bond_links:
++            bond_num += 1
++            bond_link = _get_bond_link(pg, bond_num)
++            for member_link in pg.bond_links:
++                ifc_num += 1
++                link = _get_member_link(member_link, ifc_num)
++                links.append(link)
++                bond_link['bond_links'].append(link['id'])
++            links.append(bond_link)
+ 
+     for vif in network_info:
+         if not vif.get('network') or not vif['network'].get('subnets'):
+@@ -223,7 +235,16 @@ def get_network_metadata(network_info, use_ipv6=None):
+         # Get the VIF or physical NIC data
+         if subnet_v4 or subnet_v6:
+             link = _get_eth_link(vif, ifc_num)
+-            links.append(link)
++            for lk in links:
++                # the bond link has been added while processing the portgroups
++                if (lk['type'] == 'bond' and
++                    lk['ethernet_mac_address'] ==
++                        link['ethernet_mac_address']):
++                    # Use the bond link instead
++                    link = lk
++                    break
++            else:
++                links.append(link)
+ 
+         # Add IPv4 and IPv6 networks if they exist
+         if subnet_v4 and subnet_v4.get('ips'):
+@@ -244,6 +265,30 @@ def get_network_metadata(network_info, use_ipv6=None):
+     }
+ 
+ 
++def _get_member_link(member_link, ifc_num):
++    link = {
++        'id': 'interface%d' % ifc_num,
++        'vif_id': None,
++        'type': 'ethernet',
++        'mtu': None,
++        'ethernet_mac_address': member_link.address,
++    }
++    return link
++
++
++def _get_bond_link(bond, bond_num):
++    link = {
++        'id': 'bond%d' % bond_num,
++        'vif_id': None,
++        'type': 'bond',
++        'mtu': None,
++        'bond_links': [],
++        'bond_mode': bond.extra.get('mode'),
++        'ethernet_mac_address': bond.address,
++    }
++    return link
++
++
+ def _get_eth_link(vif, ifc_num):
+     """Get a VIF or physical NIC representation.
+
