@@ -50,12 +50,12 @@ class CIMCPXEVendorPassthru(iscsi_deploy.VendorPassthru):
             n_of_pgs = len(objects.Portgroup.list_by_node_id(task.context,
                                                              task.node.id))
 
-            pg_extra = {"vif_port_id": kwargs['uuid']}
             port_group = objects.Portgroup(
                 task.context, node_id=task.node.id, address=kwargs['mac'],
-                extra={"vif_port_id": kwargs['uuid']})
+                extra={"vif_port_id": kwargs['uuid'],
+                       "mode": 4 if n_of_pgs == 0 else 0})
             port_group.create()
-            
+
             uplink_mac = netaddr.EUI(info['uplink0-mac'])
             for uplink in range(0, info['uplinks']):
                 mac_addr = netaddr.EUI(int(uplink_mac) + 1 +
