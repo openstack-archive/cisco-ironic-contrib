@@ -27,6 +27,14 @@ imcsdk = importutils.try_import('ImcSdk')
 
 CONF = cfg.CONF
 
+SWITCH_INFO = {
+    "system_name": "sw-lab-n3k-2",
+    "switch_ip": "10.86.1.119",
+    "system_desc": "Cisco Nexus Operating System (NX-OS) Software",
+    "port_desc": "connected to bxb-ds-44 VIC port 1",
+    "is_native": True
+}
+
 
 class BaseTestCase(test_common.CIMCBaseTestCase):
 
@@ -36,6 +44,17 @@ class BaseTestCase(test_common.CIMCBaseTestCase):
         info['uplinks'] = 2
         info['uplink0-mac'] = "74:A2:E6:D5:20:77"
         info['uplink1-mac'] = "74:A2:E6:D5:20:78"
+        info['uplink0-local-link'] = {
+            u'switch_info': dict.copy(SWITCH_INFO),
+            u'port_id': u'Ethernet1/29',
+            u'switch_id': u'11:11:11:11:11:11'
+        }
+
+        info['uplink1-local-link'] = {
+            u'switch_info': dict.copy(SWITCH_INFO),
+            u'port_id': u'Ethernet1/30',
+            u'switch_id': u'11:11:11:11:11:11'
+        }
         self.node.network_provider = "cimc_network_provider"
         self.node.driver_info = info
         self.node.save()

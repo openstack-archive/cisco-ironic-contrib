@@ -15,7 +15,8 @@
 from ironic.drivers import agent
 
 from cisco_ironic_contrib.ironic.cimc import boot as cimc_boot
-from cisco_ironic_contrib.ironic.cimc import vendor as cimc_deploy
+from cisco_ironic_contrib.ironic.cimc import deploy as cimc_deploy
+from cisco_ironic_contrib.ironic.cimc import inspect as cimc_inspect
 from cisco_ironic_contrib.ironic.cimc import vendor as cimc_vendor
 
 
@@ -26,3 +27,4 @@ class AgentAndCIMCNeutronDriver(agent.AgentAndCIMCDriver):
         self.boot = cimc_boot.PXEBoot()
         self.deploy = cimc_deploy.AgentDeploy()
         self.vendor = cimc_vendor.CIMCPXEVendorPassthru()
+        self.inspect = cimc_inspect.CIMCAndInspectorInspect()

@@ -15,6 +15,16 @@ else
     pip install .test-tars/ironic-master.tar.gz
 fi
 
+if $(python -c "import ironic_inspector" 2> /dev/null); then
+    echo "Ironic already installed."
+elif [ -x $ZUUL_CLONER ]; then
+    $ZUUL_CLONER --cache-dir /opt/git --workspace /tmp git://git.openstack.org openstack/ironic-inspector
+    pip install /tmp/openstack/ironic-inspector
+else
+    ( cd .test-tars && wget -N http://tarballs.openstack.org/ironic-inspector/ironic-inspector-master.tar.gz )
+    pip install .test-tars/ironic-inspector-master.tar.gz
+fi
+
 if $(python -c "import nova" 2> /dev/null); then
     echo "Nova already installed."
 elif [ -x $ZUUL_CLONER ]; then
