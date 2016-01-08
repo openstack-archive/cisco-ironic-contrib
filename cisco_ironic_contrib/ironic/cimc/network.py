@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import copy
+
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import importutils
@@ -47,7 +49,16 @@ class NetworkProvider(base.NetworkProvider):
         client = common_net.get_neutron_client()
         port = client.create_port({
             'port': {
-                "network_id": network,
+                'network_id': network,
+                'admin_state_up': True,
+                'binding:vnic_type': 'baremetal',
+                'device_owner': 'baremetal:none',
+                'device_id': task.node.uuid,
+                'binding:host_id': task.node.uuid,
+                'binding:profile': {
+                    'local_link_information': [
+                        task.node.driver_info['uplink0-local-link']],
+                }
             }
         })
 
@@ -94,7 +105,8 @@ class NetworkProvider(base.NetworkProvider):
         self._remove_network(task, TYPE_PROVISIONING)
 
     def configure_tenant_networks(self, task):
-        ports = objects.Port.list_by_node_id(task.context, task.node.id)
+        node = task.node
+        ports = objects.Port.list_by_node_id(task.context, node.id)
         vnic_id = 0
         for port in ports:
             pargs = port['extra']
@@ -118,9 +130,48 @@ class NetworkProvider(base.NetworkProvider):
                     port.extra = {x: pargs[x] for x in pargs}
                     port.extra['state'] = STATE_UP
                     port.extra['vnic_id'] = vnic_id
-                    vnic_id = vnic_id + 1
                     LOG.info("ADDING VNIC SUCCESSFUL")
                 port.save()
+                if pg_id is None and port.extra['state'] == STATE_UP:
+                    upl = vnic_id % task.node.driver_info['uplinks']
+                    local_link = copy.deepcopy(
+                        node.driver_info['uplink%d-local-link' % upl])
+                    local_link['switch_info']['is_native'] = False
+                    self._bind_port(task, pargs['vif_port_id'], [local_link])
+                vnic_id = vnic_id + 1
+        portgroups = objects.Portgroup.list_by_node_id(task.context, node.id)
+        self._bind_portgroups(task, portgroups)
+
+    def _bind_portgroups(self, task, portgroups):
+        node = task.node
+        for pg in portgroups:
+            lo_li = []
+            ports = objects.Port.list_by_portgroup_id(task.context, pg.id)
+            for port in ports:
+                vnic_id = port.extra['vnic_id']
+                upl = vnic_id % task.node.driver_info['uplinks']
+                local_link = copy.deepcopy(
+                    node.driver_info['uplink%d-local-link' % upl])
+                if pg['extra'].get('mode', 0) != 4:
+                    local_link['switch_info']['is_native'] = False
+                else:
+                    local_link['switch_info']['is_native'] = True
+                lo_li.append(local_link)
+            self._bind_port(task, pg.extra['vif_port_id'], lo_li)
+
+    def _bind_port(self, task, vif_port_id, lo_li):
+        client = common_net.get_neutron_client()
+        client.update_port(vif_port_id, {
+            'port': {
+                'admin_state_up': True,
+                'binding:vnic_type': 'baremetal',
+                'device_owner': 'baremetal:none',
+                'binding:host_id': task.node.uuid,
+                'binding:profile': {
+                    'local_link_information': lo_li,
+                }
+            }
+        })
 
     def unconfigure_tenant_networks(self, task):
         ports = objects.Port.list_by_node_id(task.context, task.node.id)

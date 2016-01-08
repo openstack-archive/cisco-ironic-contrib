@@ -20,15 +20,19 @@ CONF = cfg.CONF
 
 from oslo_versionedobjects import base
 
-
 # Patch oslo versioned objects so that the nova object registry does not
 # conflict with the ironic one.
 @staticmethod
 def newnew(cls, *args, **kwargs):
     if not cls._registry:
-        cls._registry = object.__new__(cls, *args, **kwargs)
-        cls._registry._obj_classes = collections.defaultdict(list)
-    return cls._registry
+        if not base.VersionedObjectRegistry._registry:
+            base.VersionedObjectRegistry._registry = object.__new__(
+                base.VersionedObjectRegistry, *args, **kwargs)
+            base.VersionedObjectRegistry._registry._obj_classes = (
+                collections.defaultdict(list))
+    self = object.__new__(cls, *args, **kwargs)
+    self._obj_classes = base.VersionedObjectRegistry._registry._obj_classes
+    return self
 base.VersionedObjectRegistry.__new__ = newnew
 
 # Ensure nova configs that conflict with ironic configs are unregistered for
@@ -50,3 +54,8 @@ CONF.unregister_opts(paths.path_opts)
 CONF.unregister_opt(auth.auth_opts[1])
 CONF.unregister_opts(api.neutron_opts, group='neutron')
 CONF.unregister_opts(images.image_opts)
+
+from ironic_inspector import conf
+
+CONF.unregister_opt(conf.SERVICE_OPTS[2])
+CONF.unregister_opt(conf.SERVICE_OPTS[14])
