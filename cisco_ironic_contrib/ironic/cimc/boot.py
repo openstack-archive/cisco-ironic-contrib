@@ -62,11 +62,16 @@ def get_cleaning_vifs(task):
 class PXEBoot(pxe.PXEBoot):
 
     def validate(self, task):
-        common.parse_driver_info(task.node)
+        info = common.parse_driver_info(task.node)
         provider = task.node.network_provider or CONF.network_provider
         if provider != "cimc_network_provider":
             raise exception.MissingParameterValue("Network Provider must be"
                                                   "cimc_network_provider")
+        for link in range(0, info['uplinks']):
+            val = 'uplink%d-local-link' % link
+            if not isinstance(info[val], dict):
+                raise exception.InvalidParameterValue(
+                    "%s must be a dictionary" % val)
 
     def prepare_ramdisk(self, task, ramdisk_params):
         node = task.node
