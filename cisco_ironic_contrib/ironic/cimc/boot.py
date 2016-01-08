@@ -120,7 +120,14 @@ class PXEBoot(pxe.PXEBoot):
         net_provider = common_net.get_network_provider(task)
         if deploy_utils.get_boot_option(task.node) == "local":
             net_provider.remove_provisioning_network(task)
-        net_provider.configure_tenant_networks(task)
+        try:
+            net_provider.configure_tenant_networks(task)
+        except Exception:
+            task.ports = objects.Port.list_by_node_id(
+                task.context, task.node.id)
+            task.portgroups = objects.Portgroup.list_by_node_id(
+                task.context, task.node.id)
+            net_provider.unconfigure_tenant_networks(task)
 
     def clean_up_ramdisk(self, task):
         super(PXEBoot, self).clean_up_ramdisk(task)
