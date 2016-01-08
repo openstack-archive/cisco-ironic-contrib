@@ -1,0 +1,243 @@
+commit 88c5e74239fddf87f70db693fca77bd44abfe71e
+Author: Robert Li <baoli@cisco.com>
+Date:   Tue Jan 19 12:35:57 2016 -0500
+
+    cisco hardware manager
+
+diff --git a/ironic_python_agent/cisco_hardware.py b/ironic_python_agent/cisco_hardware.py
+new file mode 100644
+index 0000000..d01dc86
+--- /dev/null
++++ b/ironic_python_agent/cisco_hardware.py
+@@ -0,0 +1,45 @@
++# Copyright 2016 Cisco Systems, Inc.
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#   http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++import binascii
++
++from oslo_log import log as logging
++
++from ironic_python_agent import hardware
++from ironic_python_agent import netutils
++
++LOG = logging.getLogger(__name__)
++
++
++class CiscoHardwareManager(hardware.GenericHardwareManager):
++    HARDWARE_MANAGER_NAME = 'cisco_hardware_manager'
++    HARDWARE_MANAGER_VERSION = '1.0'
++
++    def evaluate_hardware_support(self):
++        return hardware.HardwareSupport.SERVICE_PROVIDER
++
++    def list_hardware_info(self):
++        hw_info = super(CiscoHardwareManager, self).list_hardware_info()
++
++        ifnames = [intf.name for intf in hw_info['interfaces']
++                   if intf.name != 'lo']
++        hw_info['lldp_info'] = netutils.get_lldp_info(ifnames)
++
++        # convert the tlv value to hex
++        for ifname, tlvs in hw_info['lldp_info'].items():
++            if tlvs:
++                for idx, tlv in enumerate(tlvs):
++                    tlvs[idx] = (tlv[0], binascii.hexlify(tlv[1]))
++        LOG.info("hw_info: %s" % hw_info)
++        return hw_info
+diff --git a/ironic_python_agent/netutils.py b/ironic_python_agent/netutils.py
+index ca06d7e..1dd3ad7 100644
+--- a/ironic_python_agent/netutils.py
++++ b/ironic_python_agent/netutils.py
+@@ -12,6 +12,7 @@
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
+ 
++import binascii
+ import ctypes
+ import fcntl
+ import select
+@@ -154,6 +155,7 @@ def _receive_lldp_packets(sock):
+     # Filter invalid packets
+     if not pkt or len(pkt) < 14:
+         return
++    LOG.info("Received pkt: %s" % binascii.hexlify(pkt))
+     # Skip header (dst MAC, src MAC, ethertype)
+     pkt = pkt[14:]
+     return _parse_tlv(pkt)
+@@ -193,6 +195,8 @@ def _get_lldp_info(interfaces):
+                         _receive_lldp_packets(s))
+                     # Remove interface from the list, only need one packet
+                     del interfaces[index]
++                    # no longer need to read from the interface any more
++                    socks.remove(s)
+ 
+     # Add any interfaces that didn't get a packet as empty lists
+     for name, _sock in interfaces:
+diff --git a/ironic_python_agent/tests/unit/test_agent.py b/ironic_python_agent/tests/unit/test_agent.py
+index b41de50..2edc698 100644
+--- a/ironic_python_agent/tests/unit/test_agent.py
++++ b/ironic_python_agent/tests/unit/test_agent.py
+@@ -13,6 +13,7 @@
+ # limitations under the License.
+ 
+ import json
++import stevedore
+ import time
+ 
+ import mock
+@@ -33,6 +34,8 @@ EXPECTED_ERROR = RuntimeError('command execution failed')
+ 
+ CONF = cfg.CONF
+ 
++_global_managers = None
++
+ 
+ def foo_execute(*args, **kwargs):
+     if kwargs['fail']:
+@@ -146,6 +149,18 @@ class TestBaseAgent(test_base.BaseTestCase):
+                                                     FakeExtension,
+                                                     FakeExtension())])
+ 
++    def _get_managers():
++        global _global_managers
++
++        if not _global_managers:
++            extension_manager = stevedore.NamedExtensionManager(
++                namespace='ironic_python_agent.hardware_managers',
++                names=['generic'],
++                invoke_on_load=True)
++            _global_managers = [extension_manager['generic'].obj]
++
++        return _global_managers
++
+     def assertEqualEncoded(self, a, b):
+         # Evidently JSONEncoder.default() can't handle None (??) so we have to
+         # use encode() to generate JSON, then json.loads() to get back a python
+@@ -165,6 +180,7 @@ class TestBaseAgent(test_base.BaseTestCase):
+                          pkg_resources.get_distribution('ironic-python-agent')
+                          .version)
+ 
++    @mock.patch.object(hardware, '_get_managers', new=_get_managers)
+     @mock.patch('wsgiref.simple_server.make_server', autospec=True)
+     @mock.patch.object(hardware.HardwareManager, 'list_hardware_info')
+     def test_run(self, mocked_list_hardware, wsgi_server_cls):
+@@ -192,6 +208,7 @@ class TestBaseAgent(test_base.BaseTestCase):
+ 
+         self.agent.heartbeater.start.assert_called_once_with()
+ 
++    @mock.patch.object(hardware, '_get_managers', new=_get_managers)
+     @mock.patch.object(inspector, 'inspect', autospec=True)
+     @mock.patch('wsgiref.simple_server.make_server', autospec=True)
+     @mock.patch.object(hardware.HardwareManager, 'list_hardware_info')
+diff --git a/ironic_python_agent/tests/unit/test_cisco_hardware.py b/ironic_python_agent/tests/unit/test_cisco_hardware.py
+new file mode 100644
+index 0000000..2f2a8d5
+--- /dev/null
++++ b/ironic_python_agent/tests/unit/test_cisco_hardware.py
+@@ -0,0 +1,83 @@
++# Copyright 2016 Cisco Systems, Inc.
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#   http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++import binascii
++
++import mock
++from oslotest import base as test_base
++
++from ironic_python_agent import cisco_hardware
++from ironic_python_agent import hardware
++
++# hexlify-ed output from LLDP packet
++FAKE_LLDP_PACKET = binascii.unhexlify(
++    '0180c200000e30f70d9ca64488cc02070430f70d9ca644040d0545746865726e6574312f'
++    '3239060200780821636f6e6e656374656420746f206278622d64732d3434205649432070'
++    '6f727420310a0c73772d6c61622d6e336b2d320ca1436973636f204e65787573204f7065'
++    '726174696e672053797374656d20284e582d4f532920536f66747761726520362e302832'
++    '2941362832290a54414320737570706f72743a20687474703a2f2f7777772e636973636f'
++    '2e636f6d2f7461630a436f707972696768742028632920323030322d323031352c204369'
++    '73636f2053797374656d732c20496e632e20416c6c207269676874732072657365727665'
++    '642e0e0400140014100c05010a560177020500000000fe050001420101fe060080c20100'
++    '01100e070630f70d9ca6440205000000000000'
++)
++
++
++class TestCiscoHardwareManager(test_base.BaseTestCase):
++    def setUp(self):
++        super(TestCiscoHardwareManager, self).setUp()
++
++    def _list_hardware_info(self):
++        return {'interfaces': [hardware.NetworkInterface('eth0', None),
++                               hardware.NetworkInterface('lo', None)]}
++
++    @mock.patch.object(hardware.HardwareManager, 'list_hardware_info',
++                       new=_list_hardware_info)
++    @mock.patch('fcntl.ioctl')
++    @mock.patch('select.select')
++    @mock.patch('socket.socket')
++    def test_list_hardware_info(self, sock_mock, select_mock, fcntl_mock):
++        expected_lldp_info = {'eth0': [
++            (1, '0430f70d9ca644'),
++            (2, '0545746865726e6574312f3239'),
++            (3, '0078'),
++            (4, '636f6e6e656374656420746f206278622d6'
++                '4732d34342056494320706f72742031'),
++            (5, '73772d6c61622d6e336b2d32'),
++            (6, '436973636f204e65787573204f7065726174696e672053797374656d20284'
++                'e582d4f532920536f66747761726520362e3028322941362832290a544143'
++                '20737570706f72743a20687474703a2f2f7777772e636973636f2e636f6d2'
++                'f7461630a436f707972696768742028632920323030322d323031352c2043'
++                '6973636f2053797374656d732c20496e632e20416c6c20726967687473207'
++                '2657365727665642e'),
++            (7, '00140014'),
++            (8, '05010a560177020500000000'),
++            (127, '0001420101'),
++            (127, '0080c2010001'),
++            (8, '070630f70d9ca644020500000000'),
++            (0, '')
++        ]}
++
++        sock = mock.Mock()
++        sock.recv.return_value = FAKE_LLDP_PACKET
++        sock.fileno.return_value = 4
++
++        sock_mock.side_effect = [sock]
++
++        select_mock.side_effect = [
++            ([sock], [], [])
++        ]
++        cisco_hwmgr = cisco_hardware.CiscoHardwareManager()
++        hw_info = cisco_hwmgr.list_hardware_info()
++        self.assertEqual(expected_lldp_info, hw_info['lldp_info'])
+diff --git a/setup.cfg b/setup.cfg
+index 2d6ec62..bc01c09 100644
+--- a/setup.cfg
++++ b/setup.cfg
+@@ -28,6 +28,7 @@ ironic_python_agent.extensions =
+ 
+ ironic_python_agent.hardware_managers =
+     generic = ironic_python_agent.hardware:GenericHardwareManager
++    cisco = ironic_python_agent.cisco_hardware:CiscoHardwareManager
+ 
+ ironic_python_agent.inspector.collectors =
+     default = ironic_python_agent.inspector:collect_default
