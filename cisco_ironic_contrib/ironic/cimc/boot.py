@@ -45,7 +45,7 @@ def get_provisioning_vifs(task):
         vif = port.extra.get('vif_port_id')
         if vif:
             port_vifs[port.uuid] = vif
-    return port_vifs
+    return {'ports': port_vifs}
 
 
 def get_cleaning_vifs(task):
@@ -56,17 +56,24 @@ def get_cleaning_vifs(task):
         vif = port.extra.get('vif_port_id')
         if vif:
             port_vifs[port.uuid] = vif
-    return port_vifs
+    return {'ports': port_vifs}
 
 
 class PXEBoot(pxe.PXEBoot):
 
     def validate(self, task):
-        common.parse_driver_info(task.node)
+        info = common.parse_driver_info(task.node)
         provider = task.node.network_provider or CONF.network_provider
         if provider != "cimc_network_provider":
             raise exception.MissingParameterValue("Network Provider must be"
                                                   "cimc_network_provider")
+
+        if task.node.provision_state != states.INSPECTING:
+            for link in range(0, info['uplinks']):
+                val = 'uplink%d-local-link' % link
+                if not isinstance(info[val], dict):
+                    raise exception.InvalidParameterValue(
+                        "%s must be a dictionary" % val)
 
     def prepare_ramdisk(self, task, ramdisk_params):
         node = task.node
