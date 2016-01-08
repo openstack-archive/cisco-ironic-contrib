@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import copy
+import json
 import mock
 
 from oslo_config import cfg
@@ -70,9 +72,22 @@ class PXEBootTestCase(test_common.BaseTestCase):
         provider = network.NetworkProvider()
         provider.add_provisioning_network(task)
 
+        lo_li0 = copy.deepcopy(task.node.driver_info['uplink0-local-link'])
+        switch_info0 = json.loads(lo_li0['switch_info'])
+        switch_info0['is_native'] = False
+        lo_li0['switch_info'] = json.dumps(switch_info0)
+
         neutron_data = {
             'port': {
                 "network_id": CONF.neutron.cleaning_network_uuid,
+                'admin_state_up': True,
+                'binding:vnic_type': 'baremetal',
+                'device_owner': 'baremetal:none',
+                'device_id': task.node.uuid,
+                'binding:host_id': task.node.uuid,
+                'binding:profile': {
+                    'local_link_information': [lo_li0],
+                }
             }
         }
 
@@ -136,12 +151,14 @@ class PXEBootTestCase(test_common.BaseTestCase):
         client.delete_port.assert_called_once_with('port2')
         portMock2.destroy.assert_called_once_with()
 
+    @mock.patch.object(common_net, 'get_neutron_client', autospec=True)
     @mock.patch.object(common, 'add_vnic', autospec=True)
     @mock.patch.object(objects, 'Port', autospec=True)
     @with_task
-    def test_configure_tenant_networks(self, task, mock_port, mock_add):
+    def test_configure_tenant_networks(self, task, mock_port, mock_add,
+                                       mock_get):
         port1 = {
-            'address': "address1",
+            'address': "95:AC:4A:B6:E3:E1",
             'pxe_enabled': False,
             'portgroup_id': None,
             'extra': {
@@ -156,7 +173,7 @@ class PXEBootTestCase(test_common.BaseTestCase):
         portMock1.get.side_effect = lambda item: port1.get(item)
 
         port2 = {
-            'address': "address2",
+            'address': "95:AC:4A:B6:E3:E2",
             'pxe_enabled': False,
             'portgroup_id': None,
             'extra': {
@@ -171,7 +188,7 @@ class PXEBootTestCase(test_common.BaseTestCase):
         portMock2.get.side_effect = lambda item: port2.get(item)
 
         port3 = {
-            'address': "address3",
+            'address': "95:AC:4A:B6:E3:E3",
             'pxe_enabled': False,
             'portgroup_id': None,
             'extra': {
@@ -193,56 +210,104 @@ class PXEBootTestCase(test_common.BaseTestCase):
         provider.configure_tenant_networks(task)
 
         calls = [
-            mock.call(task, 0, "address2", 601, pxe=False),
-            mock.call(task, 1, "address3", 602, pxe=False)
+            mock.call(task, 0, "95:AC:4A:B6:E3:E2", 601, pxe=False),
+            mock.call(task, 1, "95:AC:4A:B6:E3:E3", 602, pxe=False)
         ]
         mock_add.assert_has_calls(calls)
 
-    @mock.patch.object(objects, 'Portgroup', autospec=True)
+        lo_li0 = copy.deepcopy(task.node.driver_info['uplink0-local-link'])
+        switch_info0 = json.loads(lo_li0['switch_info'])
+        switch_info0['is_native'] = False
+
+        lo_li1 = copy.deepcopy(task.node.driver_info['uplink1-local-link'])
+        switch_info1 = json.loads(lo_li1['switch_info'])
+        switch_info1['is_native'] = False
+
+        calls = [
+            mock.call(port2['extra']['vif_port_id'], {
+                'port': {
+                    'admin_state_up': True,
+                    'binding:vnic_type': 'baremetal',
+                    'device_owner': 'baremetal:none',
+                    'binding:host_id': task.node.uuid,
+                    'binding:profile': {
+                        'local_link_information': [mock.ANY]
+                    }
+                }
+            }),
+            mock.call(port3['extra']['vif_port_id'], {
+                'port': {
+                    'admin_state_up': True,
+                    'binding:vnic_type': 'baremetal',
+                    'device_owner': 'baremetal:none',
+                    'binding:host_id': task.node.uuid,
+                    'binding:profile': {
+                        'local_link_information': [mock.ANY]
+                    }
+                }
+            }),
+        ]
+        mock_get.return_value.update_port.assert_has_calls(calls)
+
+        self.assertEqual(json.loads(
+            mock_get.return_value.update_port.call_args_list[0][0][1][
+                'port']['binding:profile'][
+                    'local_link_information'][0]['switch_info']),
+            switch_info0)
+
+        self.assertEqual(json.loads(
+            mock_get.return_value.update_port.call_args_list[1][0][1][
+                'port']['binding:profile'][
+                    'local_link_information'][0]['switch_info']),
+            switch_info1)
+
+    @mock.patch.object(common_net, 'get_neutron_client', autospec=True)
+    @mock.patch.object(objects.Portgroup, 'get')
+    @mock.patch.object(objects.Portgroup, 'list_by_node_id')
     @mock.patch.object(common, 'add_vnic', autospec=True)
-    @mock.patch.object(objects, 'Port', autospec=True)
+    @mock.patch.object(objects.Port, 'list_by_portgroup_id')
+    @mock.patch.object(objects.Port, 'list_by_node_id')
+    @mock.patch.object(objects.Port, 'get')
+    @mock.patch.object(objects.Port, 'save')
     @with_task
-    def test_configure_tenant_networks_vpc(self, task, mock_port, mock_add,
-                                           mock_pg):
-        pg1 = {
-            'address': 'pg_address',
+    def test_configure_tenant_networks_vpc(self, task, mock_p_save, mock_p_get,
+                                           mock_p_list, mock_p_list_pg,
+                                           mock_add, mock_pg_list, mock_pg_get,
+                                           mock_neutron):
+        pg1 = objects.Portgroup(**{
+            'id': 1,
+            'address': '33:C2:33:52:E0:8E',
             'extra': {
-                'vif_port_id': 'vif',
+                'vif_port_id': 'vif1',
                 'mode': 4
             }
-        }
-        pgmock1 = mock.MagicMock()
-        pgmock1.__getitem__.side_effect = lambda item: pg1[item]
-        pgmock1.get.side_effect = lambda item: pg1.get(item)
+        })
 
-        pg2 = {
-            'address': 'pg_address',
+        pg2 = objects.Portgroup(**{
+            'id': 2,
+            'address': '95:AC:4A:B6:E3:E0',
             'extra': {
-                'vif_port_id': 'vif',
+                'vif_port_id': 'vif2',
                 'mode': 0
             }
-        }
-        pgmock2 = mock.MagicMock()
-        pgmock2.__getitem__.side_effect = lambda item: pg2[item]
-        pgmock2.get.side_effect = lambda item: pg2.get(item)
+        })
 
-        mock_pg.get.side_effect = lambda con, n: pgmock1 if n == 1 else pgmock2
+        mock_pg_get.side_effect = lambda con, n: pg1 if n == 1 else pg2
+        mock_pg_list.return_value = [pg1, pg2]
 
-        port1 = {
-            'address': "address1",
+        port1 = objects.Port(**{
+            'address': "95:ac:4a:b6:e3:e1",
             'pxe_enabled': False,
+            'portgroup_id': None,
             'extra': {
                 'type': 'deploy',
                 'seg_id': 600,
                 'state': "DOWN"
             }
-        }
-        portMock1 = mock.MagicMock()
-        portMock1.__getitem__.side_effect = lambda item: port1[item]
-        portMock1.get.side_effect = lambda item: port1.get(item)
+        })
 
-        port2 = {
-            'address': "address2",
+        port2 = objects.Port(**{
+            'address': "95:ac:4a:b6:e3:e2",
             'pxe_enabled': False,
             'portgroup_id': 1,
             'extra': {
@@ -250,13 +315,10 @@ class PXEBootTestCase(test_common.BaseTestCase):
                 'seg_id': 601,
                 'state': "DOWN"
             }
-        }
-        portMock2 = mock.MagicMock()
-        portMock2.__getitem__.side_effect = lambda item: port2[item]
-        portMock2.get.side_effect = lambda item: port2.get(item)
+        })
 
-        port3 = {
-            'address': "address3",
+        port3 = objects.Port(**{
+            'address': "95:ac:4a:b6:e3:e3",
             'pxe_enabled': False,
             'portgroup_id': 1,
             'extra': {
@@ -264,13 +326,10 @@ class PXEBootTestCase(test_common.BaseTestCase):
                 'seg_id': 601,
                 'state': "DOWN"
             }
-        }
-        portMock3 = mock.MagicMock()
-        portMock3.__getitem__.side_effect = lambda item: port3[item]
-        portMock3.get.side_effect = lambda item: port3.get(item)
+        })
 
-        port4 = {
-            'address': "address2",
+        port4 = objects.Port(**{
+            'address': "95:ac:4a:b6:e3:e2",
             'pxe_enabled': False,
             'portgroup_id': 2,
             'extra': {
@@ -278,13 +337,10 @@ class PXEBootTestCase(test_common.BaseTestCase):
                 'seg_id': 602,
                 'state': "DOWN"
             }
-        }
-        portMock4 = mock.MagicMock()
-        portMock4.__getitem__.side_effect = lambda item: port4[item]
-        portMock4.get.side_effect = lambda item: port4.get(item)
+        })
 
-        port5 = {
-            'address': "address3",
+        port5 = objects.Port(**{
+            'address': "95:ac:4a:b6:e3:e3",
             'pxe_enabled': False,
             'portgroup_id': 2,
             'extra': {
@@ -292,27 +348,94 @@ class PXEBootTestCase(test_common.BaseTestCase):
                 'seg_id': 602,
                 'state': "DOWN"
             }
-        }
-        portMock5 = mock.MagicMock()
-        portMock5.__getitem__.side_effect = lambda item: port5[item]
-        portMock5.get.side_effect = lambda item: port5.get(item)
+        })
 
-        mock_port.list_by_node_id.return_value = [portMock1,
-                                                  portMock2,
-                                                  portMock3,
-                                                  portMock4,
-                                                  portMock5]
+        ports = [port1, port2, port3,
+                 port4, port5]
+
+        mock_p_list.return_value = ports
+        mock_p_get.side_effect = lambda con, n: ports[n]
+        mock_p_list_pg.side_effect = lambda con, n: [p for p in ports
+                                                     if p.portgroup_id == n]
 
         provider = network.NetworkProvider()
         provider.configure_tenant_networks(task)
 
         calls = [
-            mock.call(task, 0, "address2", None, pxe=False),
-            mock.call(task, 1, "address3", None, pxe=False),
-            mock.call(task, 2, "address2", 602, pxe=False),
-            mock.call(task, 3, "address3", 602, pxe=False),
+            mock.call(task, 0, "95:ac:4a:b6:e3:e2", None, pxe=False),
+            mock.call(task, 1, "95:ac:4a:b6:e3:e3", None, pxe=False),
+            mock.call(task, 2, "95:ac:4a:b6:e3:e2", 602, pxe=False),
+            mock.call(task, 3, "95:ac:4a:b6:e3:e3", 602, pxe=False),
         ]
         mock_add.assert_has_calls(calls)
+
+        lo_li0 = copy.deepcopy(task.node.driver_info['uplink0-local-link'])
+        switch_info0 = json.loads(lo_li0['switch_info'])
+        switch_info0['is_native'] = False
+
+        lo_li1 = copy.deepcopy(task.node.driver_info['uplink1-local-link'])
+        switch_info1 = json.loads(lo_li1['switch_info'])
+        switch_info1['is_native'] = False
+
+        calls = [
+            mock.call(pg1.extra['vif_port_id'], {
+                'port': {
+                    'admin_state_up': True,
+                    'binding:vnic_type': 'baremetal',
+                    'device_owner': 'baremetal:none',
+                    'binding:host_id': task.node.uuid,
+                    'binding:profile': {
+                        'local_link_information': [
+                            mock.ANY,
+                            mock.ANY
+                        ]
+                    }
+                }
+            }),
+            mock.call(pg2.extra['vif_port_id'], {
+                'port': {
+                    'admin_state_up': True,
+                    'binding:vnic_type': 'baremetal',
+                    'device_owner': 'baremetal:none',
+                    'binding:host_id': task.node.uuid,
+                    'binding:profile': {
+                        'local_link_information': [
+                            mock.ANY,
+                            mock.ANY
+                        ]
+                    }
+                }
+            }),
+        ]
+        mock_neutron.return_value.update_port.assert_has_calls(calls)
+
+        self.assertEqual(json.loads(
+            mock_neutron.return_value.update_port.call_args_list[0][0][1][
+                'port']['binding:profile'][
+                    'local_link_information'][0]['switch_info']),
+            json.loads(
+                task.node.driver_info['uplink0-local-link']['switch_info'])
+        )
+        self.assertEqual(json.loads(
+            mock_neutron.return_value.update_port.call_args_list[0][0][1][
+                'port']['binding:profile'][
+                    'local_link_information'][1]['switch_info']),
+            json.loads(
+                task.node.driver_info['uplink1-local-link']['switch_info'])
+        )
+
+        self.assertEqual(json.loads(
+            mock_neutron.return_value.update_port.call_args_list[1][0][1][
+                'port']['binding:profile'][
+                    'local_link_information'][0]['switch_info']),
+            switch_info0
+        )
+        self.assertEqual(json.loads(
+            mock_neutron.return_value.update_port.call_args_list[1][0][1][
+                'port']['binding:profile'][
+                    'local_link_information'][1]['switch_info']),
+            switch_info1
+        )
 
     def test_unconfigure_tenant_networks(self):
         pass
