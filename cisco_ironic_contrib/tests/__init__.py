@@ -50,3 +50,8 @@ CONF.unregister_opts(paths.path_opts)
 CONF.unregister_opt(auth.auth_opts[1])
 CONF.unregister_opts(api.neutron_opts, group='neutron')
 CONF.unregister_opts(images.image_opts)
+
+from ironic_inspector import conf
+
+CONF.unregister_opt(conf.SERVICE_OPTS[2])
+CONF.unregister_opt(conf.SERVICE_OPTS[14])
