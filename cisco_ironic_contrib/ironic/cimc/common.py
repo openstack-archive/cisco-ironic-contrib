@@ -16,6 +16,7 @@ from oslo_log import log as logging
 from oslo_utils import importutils
 
 from ironic.common import exception
+from ironic.common import states
 
 from ironic.drivers.modules.cimc import common
 from ironic.drivers.modules import deploy_utils
@@ -33,6 +34,11 @@ COMMON_PROPERTIES = {
 }
 COMMON_PROPERTIES.update(REQUIRED_PROPERTIES)
 
+REQUIRED_PER_UPLINK = {
+    'mac': _('Uplink mac address.'),
+    'local-link': _('Uplink local link info')
+}
+
 
 def parse_driver_info(node):
     info = common.parse_driver_info(node)
@@ -44,10 +50,12 @@ def parse_driver_info(node):
         info[param] = node.driver_info.get(param)
     deploy_utils.check_for_missing_params(info, error_msg)
 
-    for link in range(0, info['uplinks']):
-        mac = 'uplink%d-mac' % link
-        info[mac] = node.driver_info.get(mac)
-    deploy_utils.check_for_missing_params(info, error_msg)
+    if node.provision_state != states.INSPECTING:
+        for link in range(0, info['uplinks']):
+            for param in REQUIRED_PER_UPLINK:
+                val = 'uplink%d-%s' % (link, param)
+                info[val] = node.driver_info.get(val)
+        deploy_utils.check_for_missing_params(info, error_msg)
 
     for param in COMMON_PROPERTIES:
         prop = node.driver_info.get(param)
